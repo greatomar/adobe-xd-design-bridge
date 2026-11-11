@@ -3,6 +3,7 @@
 **A local-first MCP bridge that lets an AI design agent build real, editable Adobe XD documents — plus a design-asset intelligence layer for icons, type and component patterns.**
 
 [![Tests](https://img.shields.io/badge/tests-156%2F156-brightgreen)](#testing)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.6-blueviolet)](#the-xd-plugin)
 [![MCP tools](https://img.shields.io/badge/MCP%20tools-67-blue)](#mcp-tool-surface)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A522.6-339933)](#requirements)
@@ -253,5 +254,9 @@ instead of simulating them.
 
 ## License
 
-No license file is included; all rights reserved by the author. Add a license
-before distributing.
+MIT © 2026 greatomar — see [LICENSE](LICENSE).
+
+Third-party assets are **not** bundled in this repository. Icon sets,
+fonts and design resources referenced by the asset layer keep their own
+licenses (ISC, MIT, Apache-2.0, CC0, OFL), which are recorded per asset and
+surfaced by `design_asset_license`.
