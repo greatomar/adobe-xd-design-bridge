@@ -1,0 +1,14 @@
+# Normalise line endings so Windows checkouts do not create noisy diffs.
+* text=auto eol=lf
+
+# Keep binaries untouched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.woff2 binary
+*.ttf binary
+
+# GitHub language stats: the plugin is plain JS, the bridge is TS.
+*.js linguist-language=JavaScript
+*.ts linguist-language=TypeScript
