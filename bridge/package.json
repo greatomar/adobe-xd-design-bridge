@@ -1,0 +1,20 @@
+{
+  "name": "adobexd-design-bridge",
+  "version": "1.0.0",
+  "description": "Local MCP bridge between OpenCode and Adobe XD 61.0 (private integration)",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "xd-design-bridge": "./bin/bridge.js"
+  },
+  "scripts": {
+    "start": "node bin/bridge.js",
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

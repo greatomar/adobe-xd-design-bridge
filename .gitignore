@@ -1,0 +1,39 @@
+# --- secrets & local runtime state (never commit) -------------------------
+bridge/.bridge-token
+bridge/bridge.log
+bridge/.env
+*.log
+.env
+.env.*
+
+# --- generated / machine-local -------------------------------------------
+exports/
+backups/
+asset-cache/
+bridge/asset-cache/
+**/design-context.json
+
+# --- dependencies ---------------------------------------------------------
+node_modules/
+bridge/node_modules/
+.pnpm-store/
+
+# --- vendored third-party bundles (66 MB, own licenses) -------------------
+_external/
+
+# --- scratch diagnostic plugins ------------------------------------------
+xd-plugin-diag/
+xd-plugin-diag-v4/
+
+# --- editors / OS ---------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- test/build output ----------------------------------------------------
+coverage/
+*.tsbuildinfo
+tmp-*.ts
+tmp-*.js

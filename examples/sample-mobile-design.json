@@ -1,0 +1,90 @@
+{
+  "name": "Solstice Wallet — sample mobile screen (390x844)",
+  "description": "Sample design demonstrating the full bridge pipeline: tokens, artboard, components, hierarchy. Executable via xd_execute_batch once the XD plugin is connected. Dark 'financial instrument panel' direction — deliberately not a generic AI-default style.",
+  "tokenSet": {
+    "color": {
+      "bg/primary":   { "value": "#0C1424", "type": "color" },
+      "bg/elevated":  { "value": "#15203A", "type": "color" },
+      "bg/inset":     { "value": "#0A0F1C", "type": "color" },
+      "text/primary":   { "value": "#EEF2FB", "type": "color" },
+      "text/secondary": { "value": "#8FA0C0", "type": "color" },
+      "accent/balance": { "value": "#59E0B8", "type": "color" },
+      "accent/onBalance": { "value": "#05261C", "type": "color" },
+      "state/negative": { "value": "#FF7A6E", "type": "color" }
+    },
+    "typography": {
+      "display/l": { "fontFamily": "Avenir Next", "fontSize": 34, "fontWeight": "Heavy", "lineHeight": 40, "type": "typography" },
+      "title/m":   { "fontFamily": "Avenir Next", "fontSize": 18, "fontWeight": "Demi",  "lineHeight": 24, "type": "typography" },
+      "body/m":    { "fontFamily": "Avenir Next", "fontSize": 15, "fontWeight": "Regular","lineHeight": 22, "type": "typography" },
+      "data/s":    { "fontFamily": "SF Mono", "fontSize": 13, "fontWeight": "Medium", "lineHeight": 18, "type": "typography" }
+    },
+    "spacing": {
+      "xs": { "value": 4,  "type": "spacing" },
+      "s":  { "value": 8,  "type": "spacing" },
+      "m":  { "value": 16, "type": "spacing" },
+      "l":  { "value": 24, "type": "spacing" }
+    },
+    "radius": {
+      "m": { "value": 14, "type": "radius" },
+      "l": { "value": 22, "type": "radius" }
+    },
+    "elevation": {
+      "e1": { "x": 0, "y": 6, "blur": 16, "color": "#040A142E", "type": "shadow" }
+    }
+  },
+  "operations": [
+    { "op": "create_artboard", "name": "wallet/home", "frame": { "x": 0, "y": 0, "width": 390, "height": 844 } },
+    { "op": "apply_style", "guids": ["<ARTBOARD_GUID>"], "style": { "fill": "#0C1424" } },
+
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Header/Greeting",
+      "text": "Good morning, Amara", "frame": { "x": 24, "y": 64, "width": 300 },
+      "style": { "fontFamily": "Avenir Next", "fontSize": 15, "fontWeight": "Regular", "fill": "#8FA0C0", "lineHeight": 22 } },
+
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Header/Balance",
+      "text": "$4,821.09", "frame": { "x": 24, "y": 88, "width": 340 },
+      "style": { "fontFamily": "Avenir Next", "fontSize": 34, "fontWeight": "Heavy", "fill": "#EEF2FB", "lineHeight": 40 } },
+
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Header/Delta",
+      "text": "+2.4% today", "frame": { "x": 24, "y": 134, "width": 200 },
+      "style": { "fontFamily": "SF Mono", "fontSize": 13, "fontWeight": "Medium", "fill": "#59E0B8" } },
+
+    { "op": "create_rectangle", "parent": "<ARTBOARD_GUID>", "name": "Card/Recent",
+      "frame": { "x": 24, "y": 196, "width": 342, "height": 210 },
+      "style": { "fill": "#15203A", "cornerRadius": 22, "shadow": { "x": 0, "y": 6, "blur": 16, "color": "#040A142E" } } },
+
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Card/RecentTitle",
+      "text": "Recent activity", "frame": { "x": 44, "y": 216, "width": 200 },
+      "style": { "fontFamily": "Avenir Next", "fontSize": 18, "fontWeight": "Demi", "fill": "#EEF2FB" } },
+
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Tx/1",
+      "text": "Nimbus Coffee      −$4.80", "frame": { "x": 44, "y": 254, "width": 302 },
+      "style": { "fontFamily": "SF Mono", "fontSize": 13, "fontWeight": "Medium", "fill": "#EEF2FB" } },
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Tx/2",
+      "text": "Metro transit      −$2.35", "frame": { "x": 44, "y": 292, "width": 302 },
+      "style": { "fontFamily": "SF Mono", "fontSize": 13, "fontWeight": "Medium", "fill": "#8FA0C0" } },
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Tx/3",
+      "text": "Salary deposit    +$1,900", "frame": { "x": 44, "y": 330, "width": 302 },
+      "style": { "fontFamily": "SF Mono", "fontSize": 13, "fontWeight": "Medium", "fill": "#59E0B8" } },
+
+    { "op": "create_rectangle", "parent": "<ARTBOARD_GUID>", "name": "Button/Send",
+      "frame": { "x": 24, "y": 740, "width": 164, "height": 52 },
+      "style": { "fill": "#59E0B8", "cornerRadius": 14 } },
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Button/SendLabel",
+      "text": "Send money", "frame": { "x": 24, "y": 755, "width": 164 },
+      "style": { "fontFamily": "Avenir Next", "fontSize": 15, "fontWeight": "Demi", "fill": "#05261C", "textAlign": "center" } },
+
+    { "op": "create_rectangle", "parent": "<ARTBOARD_GUID>", "name": "Button/Request",
+      "frame": { "x": 202, "y": 740, "width": 164, "height": 52 },
+      "style": { "fill": "#15203A", "cornerRadius": 14, "stroke": "#2A3854", "strokeWidth": 1 } },
+    { "op": "create_text", "parent": "<ARTBOARD_GUID>", "name": "Button/RequestLabel",
+      "text": "Request", "frame": { "x": 202, "y": 755, "width": 164 },
+      "style": { "fontFamily": "Avenir Next", "fontSize": 15, "fontWeight": "Demi", "fill": "#EEF2FB", "textAlign": "center" } }
+  ],
+  "usage": {
+    "step1": "Open a NEW disposable document in Adobe XD and connect the Design Bridge panel.",
+    "step2": "Run operations[0] alone (create_artboard) and note the returned guid.",
+    "step3": "Replace every <ARTBOARD_GUID> placeholder with that guid, then run xd_execute_batch with the remaining operations.",
+    "step4": "Run xd_export_artboard on the artboard and perform the visual critique loop (visual-qa-and-critique skill).",
+    "note": "Fonts (Avenir Next, SF Mono) must be installed; the bridge reports fontFallback when detectable."
+  }
+}
