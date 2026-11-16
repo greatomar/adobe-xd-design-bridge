@@ -20,7 +20,7 @@ test("MCP handshake and tool discovery", async (t) => {
   for (const expected of [
     "xd_health", "xd_get_capabilities", "xd_get_document_info", "xd_get_artboards",
     "xd_get_selection", "xd_inspect_node", "xd_search_nodes", "xd_create_artboard",
-    "xd_create_rectangle", "xd_create_ellipse", "xd_create_line", "xd_create_polygon", "xd_create_path", "xd_create_image", "xd_replace_image", "xd_import_asset",
+    "xd_create_screen", "xd_create_rectangle", "xd_create_ellipse", "xd_create_line", "xd_create_polygon", "xd_create_path", "xd_create_image", "xd_replace_image", "xd_import_asset",
     "xd_create_text", "xd_create_group", "xd_create_mask_group", "xd_ungroup", "xd_duplicate_node",
     "xd_delete_node", "xd_reparent_node", "xd_rotate_node", "xd_arrange_nodes", "xd_align_nodes", "xd_distribute_nodes",
     "xd_create_component", "xd_update_node", "xd_move_node", "xd_resize_node",

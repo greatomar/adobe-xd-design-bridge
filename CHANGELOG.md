@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.4 - 2026-11-16 (`create_screen`: one transaction per screen)
+
+Editing friction had a structural cause: children need the artboard GUID, which only exists after
+the artboard is created, so building a screen always cost two panel interactions.
+
+### Added
+- **`create_screen`** (plugin + `xd_create_screen` MCP tool): one queued operation creates the
+  artboard *and* its children inside a single `editDocument` transaction. The handler holds the new
+  artboard object, so `parent` is forced and the dependency disappears. Artboard name, frame and
+  background fill are applied in the same transaction.
+- Children are restricted to creation ops (`create_rectangle`, `create_ellipse`, `create_text`,
+  `create_line`, `create_polygon`, `create_path`); nesting, `create_artboard` and `execute_batch` are
+  rejected before anything reaches XD.
+- Per-child results are returned (`children[{op,name,ok,guid,error}]`) with `aborted` when a child
+  fails, matching `execute_batch` semantics.
+
+### Notes
+- 54 operations, 72 MCP tools. Plugin 1.0.11.
+- The one-click floor is unchanged in nature: XD requires one panel interaction per
+  `editDocument`. `create_screen` removes the *second* interaction a new screen used to need; it
+  cannot remove the first.
+
+### Tests
+- 2 new plugin tests (whole screen in one call; abort-after-failure). 193/193 passing.
+
 ## 1.1.3 - 2026-11-16 (Selection persistence: pan-first, select-last)
 
 A live diagnostic proved that XD **does** honour a selection assigned inside `editDocument`, but

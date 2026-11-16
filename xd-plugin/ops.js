@@ -1000,6 +1000,64 @@
       return { ok: true, guid: ab.guid, name: ab.name };
     },
 
+    create_screen: (p) => {
+      // Composite: build an artboard AND its children inside ONE editDocument
+      // transaction. Children can only be parented to the artboard created here,
+      // which is exactly the dependency that otherwise forces a second panel
+      // interaction (the artboard GUID does not exist until it is created).
+      const sc = requireScene();
+      if (!sc.ok) return sc;
+      const spec = p.artboard || {};
+      const frame = spec.frame;
+      if (!frame) return { ok: false, code: "invalid_params", error: "artboard.frame is required" };
+
+      const ab = new scenegraph.Artboard();
+      ab.width = frame.width;
+      ab.height = frame.height;
+      ab.name = spec.name || "Screen";
+      if (spec.style) applyStyle(ab, spec.style);
+      sc.root.addChild(ab);
+      setPosition(ab, frame);
+
+      const results = [];
+      let aborted = false;
+      const children = p.children || [];
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const entry = { op: child.op, name: child.name };
+        if (aborted) {
+          results.push(Object.assign({}, entry, { ok: false, error: "aborted after previous failure" }));
+          continue;
+        }
+        const h = handlers[child.op];
+        if (!h) {
+          results.push(Object.assign({}, entry, { ok: false, error: "unsupported child op: " + child.op }));
+          aborted = true;
+          continue;
+        }
+        try {
+          const params = Object.assign({}, child, { parent: ab.guid });
+          delete params.op;
+          const r = h(params);
+          results.push(Object.assign({}, entry, r));
+          if (!r.ok && r.supported !== false) aborted = true;
+        } catch (e) {
+          results.push(Object.assign({}, entry, { ok: false, error: String(e && e.message ? e.message : e) }));
+          aborted = true;
+        }
+      }
+
+      return {
+        ok: results.every((r) => r.ok),
+        guid: ab.guid,
+        name: ab.name,
+        frame: { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
+        childCount: results.length,
+        aborted,
+        children: results,
+      };
+    },
+
     create_rectangle: (p) => {
       const pf = findParent(p);
       if (!pf.parent) return { ok: false, code: pf.code, error: pf.error };

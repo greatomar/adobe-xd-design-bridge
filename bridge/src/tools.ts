@@ -371,6 +371,29 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
       handler: (a) => opCall(link, "create_artboard", a),
     },
 
+    xd_create_screen: {
+      description:
+        "ONE queued transaction builds a whole screen: an artboard plus all of its children. Use this instead of create_artboard followed by a second batch — the artboard GUID normally does not exist until it is created, which is what forces an extra Execute pending click. Children are parented to the new artboard automatically; creation ops only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          artboard: {
+            type: "object",
+            properties: { name: { type: "string" }, frame: frameSchema, style: styleSchema },
+            required: ["frame"],
+          },
+          children: {
+            type: "array",
+            maxItems: 100,
+            description: "Flat creation ops: create_rectangle | create_ellipse | create_text | create_line | create_polygon | create_path (parent is ignored and set to the new artboard)",
+            items: { type: "object" },
+          },
+        },
+        required: ["artboard", "children"],
+      },
+      handler: (a) => opCall(link, "create_screen", a),
+    },
+
     xd_create_rectangle: createShapeTool(link, "create_rectangle"),
     xd_create_ellipse: createShapeTool(link, "create_ellipse"),
 

@@ -27,7 +27,7 @@ test("all v1.0.5 operations are registered", () => {
     assert.ok(OP_KEYS.includes(op), "missing operation " + op);
     assert.equal(OPERATIONS[op].mutating, true, op + " must require an edit context");
   }
-  assert.equal(OP_KEYS.length, 53);
+  assert.equal(OP_KEYS.length, 54);
 });
 
 test("new operations are exposed as MCP tools with schemas", () => {
@@ -44,7 +44,7 @@ test("new operations are exposed as MCP tools with schemas", () => {
     assert.ok(tools[tool], "missing tool " + tool);
     assert.equal(tools[tool].inputSchema.type, "object");
   }
-  assert.equal(Object.keys(tools).length, 71, "60 xd_* tools + 11 design_asset_* / design_context_* tools");
+  assert.equal(Object.keys(tools).length, 72, "60 xd_* tools + 11 design_asset_* / design_context_* tools");
 });
 
 test("prototype focus/prepare require the edit gate; verification stays read-only", () => {

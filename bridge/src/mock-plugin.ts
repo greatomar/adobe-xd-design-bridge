@@ -89,6 +89,24 @@ export function startMockPlugin(port: number, token: string): Promise<void> {
           doc.modified = true;
           return reply(true, { ok: true, guid: g, name: ab.name, mock: true });
         }
+        case "create_screen": {
+          const spec = (p.artboard as Record<string, unknown>) ?? {};
+          const created = guid();
+          const kids = (p.children as Array<{ op: string; name?: string }>) ?? [];
+          doc.artboardCount++;
+          doc.nodeCount += kids.length;
+          doc.modified = true;
+          return reply(true, {
+            ok: true,
+            guid: created,
+            name: String(spec.name ?? "Screen"),
+            frame: spec.frame,
+            childCount: kids.length,
+            aborted: false,
+            children: kids.map((k) => ({ op: k.op, name: k.name, ok: true, guid: guid() })),
+            mock: true,
+          });
+        }
         case "create_rectangle":
         case "create_ellipse":
         case "create_text": {

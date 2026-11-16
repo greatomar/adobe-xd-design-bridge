@@ -2,10 +2,10 @@
 
 **A local-first MCP bridge that lets an AI design agent build real, editable Adobe XD documents — plus a design-asset intelligence layer for icons, type and component patterns.**
 
-[![Tests](https://img.shields.io/badge/tests-191%2F191-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-193%2F193-brightgreen)](#testing)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.10-blueviolet)](#the-xd-plugin)
-[![MCP tools](https://img.shields.io/badge/MCP%20tools-71-blue)](#mcp-tool-surface)
+[![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.11-blueviolet)](#the-xd-plugin)
+[![MCP tools](https://img.shields.io/badge/MCP%20tools-72-blue)](#mcp-tool-surface)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A522.6-339933)](#requirements)
 [![Transport](https://img.shields.io/badge/transport-127.0.0.1%20only-lightgrey)](#security-model)
 
@@ -37,7 +37,7 @@ Two hard rules shape the architecture:
              │ tools                                           │
 ┌────────────▼──────────────────────────┐                       │
 │  bridge (Node.js, TypeScript)         │                       │
-│  ├ tools.ts        71 MCP tools       │                       │
+│  ├ tools.ts        72 MCP tools       │                       │
 │  ├ operations.ts   whitelist + schema │                       │
 │  ├ assets/         registry · search  │                       │
 │  │                 cache · svg · ctx  │                       │
@@ -46,7 +46,7 @@ Two hard rules shape the architecture:
              │ ws://127.0.0.1:27183 (token auth)                │
 ┌────────────▼──────────────────────────┐                       │
 │  XD plugin (UXP panel, plain JS)      │                       │
-│  ├ ops.js       53 document operations│                       │
+│  ├ ops.js       54 document operations│                       │
 │  ├ executor.js  batch driver, 1 settle│                       │
 │  └ main.js      queue, UI, reconnect  │                       │
 └────────────┬──────────────────────────┘                       │
@@ -63,7 +63,7 @@ validation, orchestration and assets; the agent owns design judgement.
 
 ## Features
 
-### Real XD document operations (53)
+### Real XD document operations (54)
 
 | Area | Operations |
 |---|---|
@@ -177,7 +177,7 @@ the next interaction inside the panel (`Auto-apply` is on by default), or via
 
 ## MCP tool surface
 
-**71 tools**, all validated before they reach XD.
+**72 tools**, all validated before they reach XD.
 
 | Prefix | Count | Purpose |
 |---|---|---|
@@ -193,7 +193,7 @@ Highlights: `xd_execute_batch` (whole screen in one undo step),
 
 ## The XD plugin
 
-Version **1.0.10**. Plain JavaScript, no build step, no external libraries.
+Version **1.0.11**. Plain JavaScript, no build step, no external libraries.
 
 - **Execution gate** — `application.editDocument` only runs from a panel UI
   event; the panel drains the queue in one transaction (single undo entry).
@@ -215,7 +215,7 @@ cd bridge
 node --test ..\tests\*.test.ts
 ```
 
-**191/191 passing**, covering:
+**193/193 passing**, covering:
 
 - MCP protocol, tool registry, argument validation
 - Plugin handlers against a fake XD runtime (incl. `SceneNodeList` semantics)
@@ -247,7 +247,7 @@ See `SECURITY.md`.
 ```
 bridge/            MCP server + asset layer (TypeScript)
   src/assets/      registry · sources · search · cache · svg · pathdata · context
-  src/tools.ts     71 MCP tools
+  src/tools.ts     72 MCP tools
   src/operations.ts validated operation registry
 xd-plugin/         UXP panel (manifest, ops.js, executor.js, main.js, index.html)
 tests/             node:test suites

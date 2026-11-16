@@ -1,6 +1,6 @@
 # Testing
 
-## Automated test suite (passing: 191/191, 2026-11-16)
+## Automated test suite (passing: 193/193, 2026-11-16)
 
 Run from `bridge/`:
 
@@ -49,7 +49,7 @@ bridge envelope, a fake document, read-back and evidence levels.
 gates*, not live rendering, fonts, or the plugin's `editDocument` timing. Only the live checklist
 below can establish LEVEL 5 against real Adobe XD.
 
-### tests/plugin-ops.test.ts (83 tests) — real plugin handlers, fake XD runtime
+### tests/plugin-ops.test.ts (85 tests) — real plugin handlers, fake XD runtime
 
 Loads the actual `xd-plugin/ops.js` in a `vm` sandbox with a functional fake scenegraph
 (`application`, `scenegraph`, `commands`, `uxp` all mocked). No real XD API is contacted; write

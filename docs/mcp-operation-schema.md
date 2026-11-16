@@ -63,6 +63,7 @@ failure.
 | Tool | Required | Optional | Notes |
 |---|---|---|---|
 | `xd_create_artboard` | `frame` | `name` | appended to root; `fill:null` |
+| `xd_create_screen` | `artboard{frame, name?, style?}`, `children[]` | — | **one transaction** builds an artboard + its children (creation ops only, parent forced); removes the second click that `create_artboard` + batch always costs |
 | `xd_prototype_focus` | `guid` | `targetGuid` | queues pan-then-select; executed result reports `focusState` (`selection-assigned`/`selection-failed`/`focus-unverified`), `assignedTo`, `wasSelectedBefore`, `confirmationRequired`, and `viewport` evidence. Never returns `focused` |
 | `xd_prototype_prepare` | `sourceGuid`, `targetGuid` | `trigger`, `action`, `transition`, `overlay` | queues the same pan-then-select plus the manual instruction; never writes a wire |
 | `xd_create_rectangle` | `frame` | `parent`, `name`, `style` | parent defaults to first artboard — always pass one |

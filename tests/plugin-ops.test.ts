@@ -2122,10 +2122,60 @@ test("diagnostics are off by default and privacy-safe when enabled", () => {
   assert.ok(!diag.includes(layerName), "layer name must never be logged");
 });
 
-test("handler inventory preserves prior operations and exposes documented capabilities (53 ops, 15 read-only)", () => {
+test("create_screen builds an artboard and its children in one transaction", () => {
+  const h = load();
+  const r = h.handlers.create_screen({
+    artboard: { name: "Screen", frame: { x: 0, y: 0, width: 390, height: 844 }, style: { fill: "#FBFAF8" } },
+    children: [
+      { op: "create_rectangle", name: "Card", frame: { x: 24, y: 24, width: 100, height: 40 }, style: { fill: "#14645A" } },
+      { op: "create_text", name: "Title", text: "Hello", frame: { x: 24, y: 80, width: 200 }, style: { fontSize: 20 } },
+      { op: "create_line", name: "Rule", start: { x: 24, y: 120 }, end: { x: 324, y: 120 }, style: { stroke: "#D9D4CA" } },
+    ],
+  });
+
+  assert.equal(r.ok, true);
+  assert.equal(r.childCount, 3);
+  assert.equal(r.aborted, false);
+  assert.equal(r.children.length, 3);
+  assert.ok(r.children.every((c: any) => c.ok), "every child reports success");
+
+  const ab = h.sg.getNodeByGUID(r.guid);
+  assert.equal(ab.name, "Screen");
+  assert.equal(ab.width, 390);
+  assert.equal(ab.height, 844);
+  assert.equal(ab.fill.toHex(), "#FBFAF8", "artboard background applied in the same transaction");
+  assert.equal(h.kids(ab).length, 3);
+  assert.deepEqual(h.kids(ab).map((n: any) => n.name), ["Card", "Title", "Rule"]);
+  assert.ok(h.kids(ab).every((n: any) => n.parent === ab), "children are forced onto the new artboard");
+});
+
+test("create_screen aborts remaining children after the first failure", () => {
+  const h = load();
+  const r = h.handlers.create_screen({
+    artboard: { name: "S", frame: { x: 0, y: 0, width: 200, height: 200 } },
+    children: [
+      { op: "create_rectangle", name: "First", frame: { x: 0, y: 0, width: 10, height: 10 } },
+      { op: "not_a_real_op", name: "Bad" },
+      { op: "create_rectangle", name: "Third", frame: { x: 0, y: 0, width: 10, height: 10 } },
+    ],
+  });
+
+  assert.equal(r.ok, false);
+  assert.equal(r.aborted, true);
+  assert.equal(r.children[0].ok, true);
+  assert.equal(r.children[1].ok, false);
+  assert.match(String(r.children[1].error), /unsupported child op/);
+  assert.equal(r.children[2].ok, false);
+  assert.match(String(r.children[2].error), /aborted after previous failure/);
+
+  const ab = h.sg.getNodeByGUID(r.guid);
+  assert.equal(h.kids(ab).length, 1, "only the pre-failure child exists");
+});
+
+test("handler inventory preserves prior operations and exposes documented capabilities (54 ops, 15 read-only)", () => {
   const h = load();
   const names = Object.keys(h.handlers).sort();
-  assert.equal(names.length, 53);
+  assert.equal(names.length, 54);
   for (const expected of [
     "get_document_info",
     "get_artboards",
@@ -2133,6 +2183,7 @@ test("handler inventory preserves prior operations and exposes documented capabi
     "inspect_node",
     "search_nodes",
     "create_artboard",
+    "create_screen",
     "create_rectangle",
     "create_ellipse",
     "create_line",
@@ -2186,7 +2237,7 @@ test("handler inventory preserves prior operations and exposes documented capabi
     assert.ok(names.includes(expected), "missing handler " + expected);
   }
   assert.equal(h.nonMutating.size, 15);
-  assert.equal(h.mutateOps.size, 38);
+  assert.equal(h.mutateOps.size, 39);
   for (const readOnly of ["get_document_info", "get_artboards", "get_selection", "inspect_node", "search_nodes"]) {
     assert.ok(h.nonMutating.has(readOnly), readOnly + " must stay read-only");
   }

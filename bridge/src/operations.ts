@@ -434,6 +434,53 @@ export const OPERATIONS: Record<string, OpSpec> = {
     },
     preview: (p) => `create_artboard "${String(p.name ?? "")}" ${JSON.stringify(p.frame)}`,
   },
+  create_screen: {
+    op: "create_screen",
+    description: "Composite: create an artboard AND its children in ONE editDocument transaction, so a whole screen costs one panel interaction. Children are always parented to the new artboard. Creation ops only, no nesting.",
+    mutating: true,
+    validate: (p) => {
+      const spec = p.artboard;
+      if (typeof spec !== "object" || spec === null || Array.isArray(spec)) {
+        return { ok: false, error: "artboard must be an object {name?, frame, style?}" };
+      }
+      const a = spec as Record<string, unknown>;
+      const f = frame(a.frame, true);
+      if (f.error) return { ok: false, error: `artboard.${f.error}` };
+      const size = f.ok as Frame;
+      if (size.width <= 0 || size.height <= 0) return { ok: false, error: "artboard.frame width and height must be > 0" };
+      const nm = optStr(a as OpParams, "name", 256);
+      if (nm.error) return { ok: false, error: `artboard.${nm.error}` };
+      const st = validateStyle(a.style);
+      if (st.error) return { ok: false, error: `artboard.${st.error}` };
+
+      if (!Array.isArray(p.children)) return { ok: false, error: "children must be an array" };
+      if (p.children.length > 100) return { ok: false, error: "children is limited to 100 entries" };
+
+      const allowed = new Set(["create_rectangle", "create_ellipse", "create_text", "create_line", "create_polygon", "create_path"]);
+      const children: Array<OpParams> = [];
+      for (let i = 0; i < p.children.length; i++) {
+        const raw = p.children[i] as Record<string, unknown>;
+        if (typeof raw !== "object" || raw === null) return { ok: false, error: `children[${i}] must be an object` };
+        const opName = raw.op;
+        if (typeof opName !== "string") return { ok: false, error: `children[${i}].op must be a string` };
+        if (!allowed.has(opName)) {
+          return { ok: false, error: `children[${i}].op "${opName}" is not allowed in create_screen (allowed: ${[...allowed].join(", ")})` };
+        }
+        const rest: OpParams = { ...raw };
+        delete rest.op;
+        delete rest.parent;
+        const v = OPERATIONS[opName].validate(rest);
+        if (!v.ok) return { ok: false, error: `children[${i}] [${opName}] ${v.error}` };
+        children.push({ op: opName, ...v.params });
+      }
+
+      return { ok: true, params: clean({ artboard: { name: nm.value, frame: size, style: st.value }, children }) };
+    },
+    preview: (p) => {
+      const spec = p.artboard as Record<string, unknown> | undefined;
+      return `create_screen "${String(spec?.name ?? "Screen")}" (${(p.children as unknown[])?.length ?? 0} children, one transaction)`;
+    },
+  },
   create_rectangle: createShape("create_rectangle", "Create a rectangle (optionally a corner-radius card)."),
   create_ellipse: createShape("create_ellipse", "Create an ellipse (circle when width == height)."),
   create_text: {
