@@ -44,7 +44,9 @@ Mutating tool success is **not** a document change: `{ "ok": true, "queued": tru
 | `xd_inspect_node` | `guid` | `node{guid,name,type,frame,visible,locked,childCount,fill,stroke,opacity,markedForExport,children[],…text}` | LEVEL 4 read-back |
 | `xd_search_nodes` | `query?`, `type?`, `limit?` (one of query/type required) | `nodes[]` | find by name/type |
 | `xd_get_prototype_state` | — | `{flows[], interactions[]}` | read-only prototype inspection; authoring unavailable |
-| `xd_validate_prototype` | `requiredConnections[{fromGuid,toGuid,trigger?,action?}]` | `valid`, per-edge results, `authoringSupported:false` | checks expected edges against existing XD wires; no edits |
+| `xd_prototype_plan` | `manifest{name?,home?,edges[{source,target,sourceRole?,trigger?,action?,transition?,overlay?,preserveScrollPosition?,note?}]}` | `edges[]` resolved to GUIDs, `problems[]`, `stats{edgeCount,readyCount,blockedCount,artboardCount}`, `nextStep` | flow-manifest resolution; read-only, creates no wire |
+| `xd_prototype_verify` | `sourceGuid`, `targetGuid`, `trigger?`, `action?` | `status` (`ok`/`missing`/`incomplete`/`wrong-destination`/`wrong-trigger`/`wrong-action`/`ambiguous`), `verified`, `candidates[]` | per-edge verdict after manual wiring |
+| `xd_validate_prototype` | `requiredConnections[{fromGuid,toGuid,trigger?,action?}]` | `verdict` (`pass`/`fail`), `expected[]`, `detected[]`, `missing[]`, `incorrect[]`, `extra[]`, `summary{expectedCount,detectedCount,okCount,missingCount,incorrectCount,extraCount,coverage}`, `authoringSupported:false` | full prototype report; no edits |
 | `xd_audit_screen` | `guid`, `requirements[{role,types?,requireNonEmptyText?}]` | `complete`, `roles[]`, `missingRoles[]`, stats | every listed type is required for that role; structural only, not visual QA |
 | `xd_inspect_design_consistency` | `tokens?` | `findings[]`, `usage{colors,fontSizes}` | LEVEL 6 audit |
 | `xd_validate_document` | — | `findings[]` (default-name, empty-group, zero-size) | structural gate |
@@ -61,6 +63,8 @@ failure.
 | Tool | Required | Optional | Notes |
 |---|---|---|---|
 | `xd_create_artboard` | `frame` | `name` | appended to root; `fill:null` |
+| `xd_prototype_focus` | `guid` | `targetGuid` | queues pan-then-select; executed result reports `focusState` (`selection-assigned`/`selection-failed`/`focus-unverified`), `assignedTo`, `wasSelectedBefore`, `confirmationRequired`, and `viewport` evidence. Never returns `focused` |
+| `xd_prototype_prepare` | `sourceGuid`, `targetGuid` | `trigger`, `action`, `transition`, `overlay` | queues the same pan-then-select plus the manual instruction; never writes a wire |
 | `xd_create_rectangle` | `frame` | `parent`, `name`, `style` | parent defaults to first artboard — always pass one |
 | `xd_create_ellipse` | `frame` | `parent`, `name`, `style` | circle when w==h |
 | `xd_create_line` | `start{x,y}`, `end{x,y}`, `style.stroke` | `parent`, `name`, `style.strokeWidth` | visible stroke required; endpoints parent-relative |

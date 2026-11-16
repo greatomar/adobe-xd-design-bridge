@@ -21,6 +21,7 @@ import vm from "node:vm";
 
 const OPS_PATH = join(process.env.LOCALAPPDATA ?? "", "OpenCode", "AdobeXD-DesignBridge", "xd-plugin", "ops.js");
 const OPS_SRC = readFileSync(OPS_PATH, "utf8");
+const MAIN_SRC = readFileSync(join(process.env.LOCALAPPDATA ?? "", "OpenCode", "AdobeXD-DesignBridge", "xd-plugin", "main.js"), "utf8");
 const PNG_BYTES = [137, 80, 78, 71, 13, 10, 26, 10];
 
 /** Objects created inside the vm context have their own prototypes; normalize before deep comparison. */
@@ -43,6 +44,13 @@ interface Harness {
   app: any;
   sg: any;
   interactions: any;
+  viewport: any;
+  viewportState: any;
+  selectionState: any;
+  order: string[];
+  /** Run a handler the way the panel does: inside application.editDocument. */
+  inEditDocument: <T>(fn: () => T) => T;
+  setViewportAvailable: (on: boolean) => void;
   root: any;
   doc: any;
   access: { root: number; path: number; modified: number };
@@ -83,7 +91,7 @@ function sceneNodeList(items: any[]) {
  * properties the handlers read. Renditions and the file system are recorded,
  * never performed.
  */
-function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNodeList"; filePickerCancel?: boolean } = {}): Harness {
+function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNodeList"; filePickerCancel?: boolean; enforceEditContext?: boolean } = {}): Harness {
   const childrenKind = opts.childrenKind ?? "array";
   const logs: string[] = [];
   const record = (...args: unknown[]) => {
@@ -276,15 +284,40 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
     });
   }
 
+  // Live XD rejects `scenegraph.selection.items = [...]` outside editDocument
+  // ("not permitted to make changes from the background"). The fake runtime can
+  // enforce the same rule so tests cannot pass on behaviour XD forbids.
+  const selectionState: { items: any[]; throwOnGuids: Set<string> } = { items: [], throwOnGuids: new Set<string>() };
+  const editContext = { active: false };
+  /** Ordered log of scenegraph-affecting operations, for ordering assertions. */
+  const order: string[] = [];
+
+  const selection: any = {
+    blockedGuids: new Set<string>(),
+    isInEditContext(node: any) {
+      return !this.blockedGuids.has(node.guid);
+    },
+    get items() {
+      return selectionState.items;
+    },
+    set items(next: any[]) {
+      const target = (next || [])[0];
+      const backgroundWrite = opts.enforceEditContext === true && !editContext.active;
+      const blocked = !!(target && target.guid && selectionState.throwOnGuids.has(target.guid));
+      if (backgroundWrite || blocked) {
+        throw new Error(
+          "Plugin mock is not permitted to make changes from the background. "
+          + "Use editDocument() for panel UI handlers, or return a Promise to extend an edit operation asynchronously.",
+        );
+      }
+      selectionState.items = next;
+      order.push("selection:set");
+    },
+  };
+
   const sg: any = {
     root,
-    selection: {
-      items: [] as any[],
-      blockedGuids: new Set<string>(),
-      isInEditContext(node: any) {
-        return !this.blockedGuids.has(node.guid);
-      },
-    },
+    selection,
     getNodeByGUID: (guid: string) => {
       const node = registry.get(guid);
       let parent = node;
@@ -509,6 +542,37 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
 
   const interactions: any = { flows: [], allInteractions: [] };
 
+  // Documented viewport API: scrollIntoView(node) | (x,y,w,h), scrollToCenter(x,y),
+  // zoomToRect(...), plus read-only bounds and zoomFactor. There is deliberately no
+  // `scrollToRect` here, because XD has no such method.
+  const viewportState: any = {
+    bounds: { x: 0, y: 0, width: 2000, height: 2000 },
+    zoomFactor: 1,
+    calls: [] as any[],
+    panOnScroll: true,
+  };
+  const viewport: any = {
+    get bounds() {
+      return viewportState.bounds ? { ...viewportState.bounds } : undefined;
+    },
+    get zoomFactor() {
+      return viewportState.zoomFactor ?? undefined;
+    },
+    scrollIntoView(node: any) {
+      viewportState.calls.push(node);
+      order.push("viewport:scrollIntoView");
+      if (viewportState.panOnScroll && viewportState.bounds) {
+        viewportState.bounds = { ...viewportState.bounds, x: viewportState.bounds.x + 120 };
+      }
+    },
+    scrollToCenter(x: number, y: number) {
+      viewportState.calls.push({ x, y });
+    },
+    zoomToRect(...args: any[]) {
+      viewportState.calls.push({ zoomToRect: args });
+    },
+  };
+
   const files: any[] = [];
   const renditionCalls: any[][] = [];
   const application: any = {
@@ -529,7 +593,15 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
       imported.fill = { toHex: () => "#IMAGE" };
       target.addChild(imported);
     },
-    editDocument: (_opts: unknown, fn?: () => unknown) => (typeof _opts === "function" ? _opts() : fn && fn()),
+    editDocument: (_opts: unknown, fn?: () => unknown) => {
+      const callback = typeof _opts === "function" ? (_opts as () => unknown) : fn;
+      editContext.active = true;
+      try {
+        return callback ? callback() : undefined;
+      } finally {
+        editContext.active = false;
+      }
+    },
   };
 
   const uxp = {
@@ -564,7 +636,7 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
     },
   };
 
-  const modules: Record<string, any> = { scenegraph: sg, commands, application, uxp, interactions };
+  const modules: Record<string, any> = { scenegraph: sg, commands, application, uxp, interactions, viewport };
 
   const sandbox: any = {
     console: consoleStub,
@@ -606,6 +678,15 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
     app: application,
     sg,
     interactions,
+    viewport,
+    viewportState,
+    selectionState,
+    order,
+    inEditDocument: <T>(fn: () => T): T => application.editDocument({ editLabel: "test" }, fn) as T,
+    setViewportAvailable: (on: boolean) => {
+      if (on) modules.viewport = viewport;
+      else delete modules.viewport;
+    },
     root,
     doc,
     access,
@@ -639,6 +720,23 @@ function seeded(h: Harness) {
   title.fontSize = 18;
   card.addChild(title);
   return { home, card, rect, title };
+}
+
+/**
+ * Seed the fake `interactions` module with real-looking wires.
+ * A null destination models an incomplete XD connection.
+ */
+function setWires(h: Harness, edges: Array<{ from: any; to: any; trigger?: string; action?: string }>) {
+  const bySource = new Map<any, any>();
+  for (const edge of edges) {
+    const entry = bySource.get(edge.from) ?? { triggerNode: edge.from, interactions: [] };
+    entry.interactions.push({
+      trigger: { type: edge.trigger ?? "tap" },
+      action: { type: edge.action ?? "goToArtboard", destination: edge.to },
+    });
+    bySource.set(edge.from, entry);
+  }
+  h.interactions.allInteractions = [...bySource.values()];
 }
 
 // --- blank document ----------------------------------------------------------
@@ -1161,7 +1259,371 @@ test("validate_prototype detects missing connections without attempting to autho
   assert.ok(fail.results[0].problems.includes("connection-missing"));
 });
 
+test("prototype_focus rejects a background selection change and reports selection-failed", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+
+  // Called outside editDocument, exactly like the old (broken) implementation.
+  const r = h.handlers.prototype_focus({ guid: rect.guid });
+  assert.equal(r.ok, true, "the handler reports the failure instead of crashing");
+  assert.equal(r.focusState, "selection-failed");
+  assert.equal(r.selectedInTransaction, false);
+  assert.match(String(r.selectionError), /not permitted to make changes from the background|editDocument/i);
+  assert.equal(h.sg.selection.items.length, 0, "selection must not change");
+});
+
+test("prototype_focus assigns selection inside the edit gate and it persists after commit", () => {
+  const h = load({ enforceEditContext: true });
+  const { home, rect } = seeded(h);
+  const details = h.artboard("Details", { x: 550, y: 0 });
+  h.root.addChild(details);
+  h.inEditDocument(() => { h.sg.selection.items = [home]; });
+  h.order.length = 0;
+
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid, targetGuid: details.guid }));
+  assert.equal(r.ok, true);
+  assert.equal(r.executed, true);
+  assert.equal(r.executedInEditContext, true);
+  assert.equal(r.focusState, "selection-assigned");
+  assert.equal(r.assignedTo, rect.guid);
+  assert.equal(r.selectedInTransaction, true);
+  assert.equal(r.wasSelectedBefore, false);
+  assert.equal(r.selectionError, null);
+  assert.equal(r.confirmationRequired, "read xd_get_selection after execution");
+  assert.equal("focused" in r, false, "the operation never claims focus; only the post-commit read can");
+
+  // Post-commit: the fake runtime models the observed host behaviour — a selection
+  // assigned inside the edit transaction survives the commit.
+  assert.equal(h.sg.selection.items[0].guid, rect.guid, "selection persists after the transaction");
+  assert.equal(r.source.name, "Card/Background");
+  assert.equal(r.artboard.guid, home.guid);
+  assert.equal(r.createdWire, false);
+  assert.equal(h.interactions.allInteractions.length, 0, "focus never writes a wire");
+});
+
+test("focus pans the viewport BEFORE assigning selection, so selection is the last step", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  h.inEditDocument(() => { h.sg.selection.items = []; });
+  h.order.length = 0;
+
+  h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.deepEqual(plain(h.order), ["viewport:scrollIntoView", "selection:set"]);
+});
+
+test("a node that was already selected is flagged via wasSelectedBefore, not reported as focus", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  h.inEditDocument(() => { h.sg.selection.items = [rect]; });
+
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(r.focusState, "selection-assigned");
+  assert.equal(r.wasSelectedBefore, true, "the agent is told this was not a change");
+  assert.equal(r.assignedTo, rect.guid);
+  assert.equal("focused" in r, false);
+});
+
+test("a selection failure is reported and can never produce a focus claim", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  h.selectionState.throwOnGuids.add(rect.guid);
+
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(r.focusState, "selection-failed");
+  assert.equal(r.assignedTo, null);
+  assert.equal(typeof r.selectionError, "string");
+  assert.equal("focused" in r, false, "an error can never be dressed up as focus");
+});
+
+test("focus reports focus-unverified when selection state cannot be read", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  const original = h.sg.selection;
+  let unreadable = false;
+  Object.defineProperty(h.sg, "selection", {
+    configurable: true,
+    get() {
+      if (unreadable) return null;
+      return original;
+    },
+  });
+
+  unreadable = true;
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(r.focusState, "focus-unverified");
+  assert.equal("focused" in r, false);
+});
+
+test("prototype_focus uses scrollIntoView(node) and proves movement from viewport.bounds", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  // Park the viewport far away so the node is genuinely out of view.
+  h.viewportState.bounds = { x: 5000, y: 5000, width: 2000, height: 2000 };
+
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(h.viewportState.calls.length, 1);
+  assert.equal(h.viewportState.calls[0], rect, "the resolved node is passed, not a rect copy");
+  assert.equal(r.viewport.api, "scrollIntoView");
+  assert.equal(r.viewport.scrolled, true);
+  assert.equal(r.viewport.code, "viewport_moved");
+  assert.equal(r.viewport.evidence, "bounds");
+  assert.notDeepEqual(plain(r.viewport.before.bounds), plain(r.viewport.after.bounds));
+  assert.equal(typeof r.viewport.before.zoomFactor, "number");
+});
+
+test("viewport movement is not claimed when no evidence shows a change", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  h.viewportState.bounds = { x: 5000, y: 5000, width: 2000, height: 2000 };
+  h.viewportState.panOnScroll = false;
+
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(r.viewport.scrolled, false, "an API call that did not throw is not movement");
+  assert.equal(r.viewport.code, "viewport_change_unverified");
+  assert.match(String(r.viewport.reason), /not proven/i);
+  assert.deepEqual(plain(r.viewport.before.bounds), plain(r.viewport.after.bounds));
+});
+
+test("a node already inside viewport.bounds is reported as already-in-view", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  h.viewportState.bounds = { x: 0, y: 0, width: 2000, height: 2000 };
+  h.viewportState.panOnScroll = false;
+
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(r.viewport.scrolled, false);
+  assert.equal(r.viewport.code, "already-in-view");
+  assert.match(String(r.viewport.reason), /already fully inside/i);
+});
+
+test("an unavailable or unsupported viewport API degrades honestly", () => {
+  const missing = load({ enforceEditContext: true });
+  const seededMissing = seeded(missing);
+  missing.setViewportAvailable(false);
+  const unavailable = missing.inEditDocument(() => missing.handlers.prototype_focus({ guid: seededMissing.rect.guid }));
+  assert.equal(unavailable.viewport.scrolled, false);
+  assert.equal(unavailable.viewport.code, "viewport_unavailable");
+
+  const unsupported = load({ enforceEditContext: true });
+  const { rect } = seeded(unsupported);
+  delete unsupported.viewport.scrollIntoView;
+  const r = unsupported.inEditDocument(() => unsupported.handlers.prototype_focus({ guid: rect.guid }));
+  assert.equal(r.viewport.scrolled, false);
+  assert.equal(r.viewport.code, "viewport_unsupported");
+  assert.equal(unsupported.viewportState.calls.length, 0);
+});
+
+test("the plugin source never references the non-existent viewport method", () => {
+  assert.equal(OPS_SRC.includes("scrollToRect"), false, "scrollToRect is not part of the XD API");
+  assert.equal(OPS_SRC.includes("scrollIntoView"), true, "the documented method is used");
+});
+
+test("edit-gated prototype ops are queued through the panel, not executed in the background", () => {
+  const h = load({ enforceEditContext: true });
+  assert.ok(h.mutateOps.has("prototype_focus"), "focus needs editDocument, so it must be queued");
+  assert.ok(h.mutateOps.has("prototype_prepare_connection"), "prepare needs editDocument, so it must be queued");
+  assert.ok(!h.nonMutating.has("prototype_focus"));
+  assert.ok(!h.nonMutating.has("prototype_prepare_connection"));
+  assert.ok(h.nonMutating.has("prototype_verify_connection"), "verification stays read-only");
+
+  // main.js routes by nonMutating membership: everything else is queued and the
+  // caller is answered immediately with {queued:true, pending:N} — never with a result.
+  assert.match(MAIN_SRC, /const isReadOnly = window\.__xdBridgeOps\.nonMutating\.has\(msg\.op\)/);
+  assert.match(MAIN_SRC, /queue\.push\(\{ id: msg\.id, op: msg\.op, params: msg\.params \|\| \{\} \}\)/);
+  assert.match(MAIN_SRC, /queued: true, op: msg\.op, pending: queue\.length/);
+});
+
+test("prototype_focus rejects an unknown source GUID and leaves selection untouched", () => {
+  const h = load({ enforceEditContext: true });
+  seeded(h);
+  const r = h.inEditDocument(() => h.handlers.prototype_focus({ guid: "guid-does-not-exist" }));
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "node_not_found");
+  assert.equal(h.sg.selection.items.length, 0);
+  assert.equal(h.viewportState.calls.length, 0);
+});
+
+test("prototype_prepare_connection validates the target artboard", () => {
+  const h = load();
+  const { rect } = seeded(h);
+
+  const missing = h.handlers.prototype_prepare_connection({ sourceGuid: rect.guid, targetGuid: "guid-missing" });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, "target_not_found");
+
+  const notArtboard = h.handlers.prototype_prepare_connection({ sourceGuid: rect.guid, targetGuid: rect.guid });
+  assert.equal(notArtboard.ok, false);
+  assert.equal(notArtboard.code, "target_not_artboard");
+
+  const badSource = h.handlers.prototype_prepare_connection({ sourceGuid: "guid-missing", targetGuid: rect.guid });
+  assert.equal(badSource.ok, false);
+  assert.equal(badSource.code, "node_not_found");
+});
+
+test("prototype_prepare_connection focuses inside the edit gate and returns a manual instruction", () => {
+  const h = load({ enforceEditContext: true });
+  const { home, rect } = seeded(h);
+  const details = h.artboard("Details", { x: 550, y: 0 });
+  h.root.addChild(details);
+  h.inEditDocument(() => { h.sg.selection.items = [home]; });
+  h.order.length = 0;
+
+  const r = h.inEditDocument(() => h.handlers.prototype_prepare_connection({
+    sourceGuid: rect.guid,
+    targetGuid: details.guid,
+    trigger: "tap",
+    action: "goToArtboard",
+    transition: { type: "dissolve", duration: 0.3 },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(r.executed, true);
+  assert.equal(r.status, "ready");
+  assert.equal(r.createdWire, false);
+  assert.equal(r.authoringSupported, false);
+  assert.equal(r.verdict.status, "missing");
+  assert.equal(r.focusState, "selection-assigned");
+  assert.equal(r.assignedTo, rect.guid);
+  assert.equal(r.wasSelectedBefore, false);
+  assert.equal(r.confirmationRequired, "read xd_get_selection after execution");
+  assert.equal("focused" in r, false, "the operation never claims focus");
+  assert.equal(h.sg.selection.items[0].guid, rect.guid, "selection persists after commit");
+  assert.ok(h.order.indexOf("viewport:scrollIntoView") < h.order.indexOf("selection:set"), "pan happens before selection");
+  assert.equal(r.connection.target.guid, details.guid);
+  assert.match(r.instruction, /Prototype mode/i);
+  assert.match(r.instruction, /does not create the wire/i);
+  assert.match(r.instruction, /dissolve/);
+  assert.equal(r.checklist.length, 4);
+  assert.equal(h.interactions.allInteractions.length, 0, "preparing is not wiring");
+});
+
+test("prototype_prepare_connection reports an existing wire without moving the canvas", () => {
+  const h = load({ enforceEditContext: true });
+  const { rect } = seeded(h);
+  const details = h.artboard("Details");
+  h.root.addChild(details);
+  setWires(h, [{ from: rect, to: details }]);
+
+  const r = h.inEditDocument(() => h.handlers.prototype_prepare_connection({ sourceGuid: rect.guid, targetGuid: details.guid }));
+  assert.equal(r.status, "already-wired");
+  assert.equal(r.focusState, "not-attempted");
+  assert.equal(r.assignedTo, null);
+  assert.equal(r.viewport.code, "not-attempted");
+  assert.equal(h.viewportState.calls.length, 0, "no canvas movement for an existing wire");
+  assert.equal(r.checklist.length, 0);
+  assert.match(r.instruction, /already exists/i);
+});
+
+test("prototype_prepare_connection flags a wire that points at the wrong artboard", () => {
+  const h = load({ enforceEditContext: true });
+  const { home, rect } = seeded(h);
+  const details = h.artboard("Details");
+  h.root.addChild(details);
+  setWires(h, [{ from: rect, to: home }]);
+
+  const r = h.inEditDocument(() => h.handlers.prototype_prepare_connection({ sourceGuid: rect.guid, targetGuid: details.guid }));
+  assert.equal(r.status, "wrong-wire-present");
+  assert.equal(r.verdict.status, "wrong-destination");
+  assert.equal(r.verdict.candidates.length, 1);
+  assert.match(r.instruction, /Existing wire/i);
+});
+
+test("prototype_verify_connection distinguishes every wire state", () => {
+  const h = load();
+  const { rect } = seeded(h);
+  const details = h.artboard("Details");
+  const booking = h.artboard("Booking");
+  h.root.addChild(details);
+  h.root.addChild(booking);
+
+  const verify = (to: any, trigger = "tap", action = "goToArtboard") =>
+    h.handlers.prototype_verify_connection({ sourceGuid: rect.guid, targetGuid: to.guid, trigger, action });
+
+  assert.equal(verify(details).status, "missing");
+
+  setWires(h, [{ from: rect, to: details }]);
+  const ok = verify(details);
+  assert.equal(ok.status, "ok");
+  assert.equal(ok.verified, true);
+  assert.equal(ok.matches.length, 1);
+  assert.equal(ok.authoringSupported, false);
+
+  assert.equal(verify(booking).status, "wrong-destination");
+  assert.equal(verify(details, "drag").status, "wrong-trigger");
+  assert.equal(verify(details, "tap", "overlay").status, "wrong-action");
+
+  setWires(h, [{ from: rect, to: null }]);
+  assert.equal(verify(details).status, "incomplete");
+
+  setWires(h, [{ from: rect, to: details }, { from: rect, to: details }]);
+  assert.equal(verify(details).status, "ambiguous");
+});
+
+test("validate_prototype returns a complete pass report with semantics and GUIDs", () => {
+  const h = load();
+  const { rect } = seeded(h);
+  const details = h.artboard("Details");
+  h.root.addChild(details);
+  setWires(h, [{ from: rect, to: details, trigger: "tap", action: "goToArtboard" }]);
+
+  const report = h.handlers.validate_prototype({
+    requiredConnections: [{ fromGuid: rect.guid, toGuid: details.guid, trigger: "tap", action: "goToArtboard" }],
+  });
+  assert.equal(report.ok, true);
+  assert.equal(report.valid, true);
+  assert.equal(report.verdict, "pass");
+  assert.equal(report.authoringSupported, false);
+  assert.equal(report.summary.expectedCount, 1);
+  assert.equal(report.summary.detectedCount, 1);
+  assert.equal(report.summary.coverage, 1);
+  assert.equal(report.expected[0].fromName, "Card/Background");
+  assert.equal(report.expected[0].toName, "Details");
+  assert.equal(report.expected[0].fromGuid, rect.guid);
+  assert.equal(report.detected[0].toGuid, details.guid);
+  assert.deepEqual(plain(report.missing), []);
+  assert.deepEqual(plain(report.incorrect), []);
+  assert.deepEqual(plain(report.extra), []);
+});
+
+test("validate_prototype reports an incomplete prototype as a failure with per-edge reasons", () => {
+  const h = load();
+  const { rect, title } = seeded(h);
+  const details = h.artboard("Details");
+  h.root.addChild(details);
+  setWires(h, [{ from: rect, to: details, trigger: "tap", action: "goToArtboard" }]);
+
+  const report = h.handlers.validate_prototype({
+    requiredConnections: [
+      { fromGuid: rect.guid, toGuid: details.guid, trigger: "tap", action: "goToArtboard" },
+      { fromGuid: title.guid, toGuid: details.guid, trigger: "tap" },
+    ],
+  });
+  assert.equal(report.valid, false);
+  assert.equal(report.verdict, "fail");
+  assert.equal(report.summary.expectedCount, 2);
+  assert.equal(report.summary.missingCount, 1);
+  assert.equal(report.summary.coverage, 0.5);
+  assert.equal(report.results[1].status, "missing");
+  assert.equal(report.missing[0].fromGuid, title.guid);
+});
+
+test("validate_prototype lists extra wires the manifest never declared", () => {
+  const h = load();
+  const { home, rect } = seeded(h);
+  const details = h.artboard("Details");
+  h.root.addChild(details);
+  setWires(h, [{ from: rect, to: details }, { from: home, to: details, trigger: "time" }]);
+
+  const report = h.handlers.validate_prototype({ requiredConnections: [{ fromGuid: rect.guid, toGuid: details.guid }] });
+  assert.equal(report.valid, true, "undeclared wires do not invalidate declared edges");
+  assert.equal(report.summary.extraCount, 1);
+  assert.equal(report.extra[0].fromGuid, home.guid);
+  assert.equal(report.extra[0].fromName, "Home");
+  assert.equal(report.extra[0].trigger, "time");
+});
+
 test("audit_screen checks screen-specific semantic roles without imposing a node quota", () => {
+
+
   const h = load();
   const { home } = seeded(h);
   const requirements = [
@@ -1660,10 +2122,10 @@ test("diagnostics are off by default and privacy-safe when enabled", () => {
   assert.ok(!diag.includes(layerName), "layer name must never be logged");
 });
 
-test("handler inventory preserves prior operations and exposes documented capabilities (50 ops, 14 read-only)", () => {
+test("handler inventory preserves prior operations and exposes documented capabilities (53 ops, 15 read-only)", () => {
   const h = load();
   const names = Object.keys(h.handlers).sort();
-  assert.equal(names.length, 50);
+  assert.equal(names.length, 53);
   for (const expected of [
     "get_document_info",
     "get_artboards",
@@ -1716,17 +2178,25 @@ test("handler inventory preserves prior operations and exposes documented capabi
     "replace_background",
     "set_layout",
     "set_constraints",
+    // v1.0.7 prototype wiring assistant (focus + per-edge preparation/verification)
+    "prototype_focus",
+    "prototype_prepare_connection",
+    "prototype_verify_connection",
   ]) {
     assert.ok(names.includes(expected), "missing handler " + expected);
   }
-  assert.equal(h.nonMutating.size, 14);
-  assert.equal(h.mutateOps.size, 36);
+  assert.equal(h.nonMutating.size, 15);
+  assert.equal(h.mutateOps.size, 38);
   for (const readOnly of ["get_document_info", "get_artboards", "get_selection", "inspect_node", "search_nodes"]) {
     assert.ok(h.nonMutating.has(readOnly), readOnly + " must stay read-only");
   }
   assert.ok(h.nonMutating.has("get_prototype_state"), "prototype state inspection stays read-only");
   assert.ok(h.nonMutating.has("audit_screen"), "screen role audit is read-only");
   assert.ok(h.nonMutating.has("validate_prototype"), "prototype edge validation is read-only");
+  assert.ok(!h.nonMutating.has("prototype_focus"), "XD refuses background selection writes, so focus must be queued");
+  assert.ok(!h.nonMutating.has("prototype_prepare_connection"), "prepare selects a node, so it must be queued");
+  assert.ok(h.nonMutating.has("prototype_verify_connection"), "verifying a connection is read-only by definition");
+  assert.ok(h.mutateOps.has("prototype_focus"), "focus travels through the editDocument gate");
   assert.ok(h.nonMutating.has("create_component"), "unsupported component creation is reported immediately, not queued");
   assert.ok(h.nonMutating.has("create_component_variants"), "unsupported variants are reported immediately, not queued");
   assert.ok(!h.nonMutating.has("create_rectangle"), "writes must stay queued");

@@ -113,6 +113,30 @@ test("QA skill requires panel execution before corrections count and structural 
   assert.match(QA_SKILL, /structurally finished/i);
 });
 
+test("agent contract defines the assisted prototype workflow and never claims authorship", () => {
+  assert.match(AGENT, /# 7A\. Prototype wiring workflow \(a plan is not a prototype\)/);
+  for (const tool of ["xd_prototype_plan", "xd_prototype_prepare", "xd_prototype_verify"]) {
+    assert.ok(AGENT.includes(tool), `agent contract must document ${tool}`);
+  }
+  assert.match(AGENT, /Never accept "I created the wire" as evidence/);
+  assert.match(AGENT, /A planned flow is never an implemented flow/);
+  assert.match(AGENT, /manual wiring outstanding/);
+  assert.match(AGENT, /It never writes the wire/);
+  // focus/prepare are queued edits because XD refuses background selection writes;
+  // plan/verify/validate stay immediate.
+  assert.match(AGENT, /must select a node, and XD refuses/);
+  assert.match(AGENT, /ordinary queued edits/);
+  assert.match(AGENT, /never returns `focused`/);
+  assert.match(AGENT, /Confirm focus only with an independent `xd_get_selection`/);
+  assert.match(AGENT, /viewport_change_unverified/);
+  // schema + skill agree on the new surface
+  for (const tool of ["xd_prototype_plan", "xd_prototype_focus", "xd_prototype_prepare", "xd_prototype_verify"]) {
+    assert.ok(SCHEMA.includes(tool), `missing schema entry ${tool}`);
+    assert.ok(XD_SKILL.includes(tool), `missing skill entry ${tool}`);
+  }
+  assert.match(XD_SKILL, /no documented public API creates|wire authoring is not/i);
+});
+
 test("schema reference documents the flat shape and the rejected nesting", () => {
   assert.match(SCHEMA, /Flat\. Parameters are siblings of `op`, never nested/);
   assert.match(SCHEMA, /Rejected: `\{ "op": "create_rectangle", "params"/);

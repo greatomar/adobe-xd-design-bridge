@@ -27,7 +27,7 @@ test("all v1.0.5 operations are registered", () => {
     assert.ok(OP_KEYS.includes(op), "missing operation " + op);
     assert.equal(OPERATIONS[op].mutating, true, op + " must require an edit context");
   }
-  assert.equal(OP_KEYS.length, 50);
+  assert.equal(OP_KEYS.length, 53);
 });
 
 test("new operations are exposed as MCP tools with schemas", () => {
@@ -44,7 +44,25 @@ test("new operations are exposed as MCP tools with schemas", () => {
     assert.ok(tools[tool], "missing tool " + tool);
     assert.equal(tools[tool].inputSchema.type, "object");
   }
-  assert.equal(Object.keys(tools).length, 67, "56 xd_* tools + 11 design_asset_* / design_context_* tools");
+  assert.equal(Object.keys(tools).length, 71, "60 xd_* tools + 11 design_asset_* / design_context_* tools");
+});
+
+test("prototype focus/prepare require the edit gate; verification stays read-only", () => {
+  for (const op of ["prototype_focus", "prototype_prepare_connection", "prototype_verify_connection"]) {
+    assert.ok(OP_KEYS.includes(op), "missing operation " + op);
+  }
+  // XD rejects `scenegraph.selection.items = [...]` outside editDocument, so the
+  // operations that select a node must travel through the panel queue.
+  assert.equal(OPERATIONS.prototype_focus.mutating, true, "focus selects a node, so it needs editDocument");
+  assert.equal(OPERATIONS.prototype_prepare_connection.mutating, true, "prepare selects a node, so it needs editDocument");
+  assert.equal(OPERATIONS.prototype_verify_connection.mutating, false, "verification only reads");
+  assert.deepEqual(
+    validateOperation({ op: "prototype_prepare_connection", sourceGuid: "a", targetGuid: "b" }).ok,
+    true,
+  );
+  assert.equal(validateOperation({ op: "prototype_prepare_connection", sourceGuid: "a" }).ok, false);
+  assert.equal(validateOperation({ op: "prototype_verify_connection", sourceGuid: "a", targetGuid: "b", trigger: "hover" }).ok, false);
+  assert.equal(validateOperation({ op: "prototype_focus", targetGuid: "b" }).ok, false);
 });
 
 test("update_path requires SVG path data starting with a move or close command", () => {

@@ -13,6 +13,7 @@ import { parseSvg } from "./assets/svg.ts";
 import { transformPathData } from "./assets/pathdata.ts";
 import { ASSET_CATEGORIES } from "./assets/types.ts";
 import type { AssetCategory, DesignContext, SearchQuery } from "./assets/types.ts";
+import { validateFlowManifest, resolveFlowManifest } from "./prototype.ts";
 
 export interface McpContent {
   type: "text" | "image";
@@ -203,7 +204,7 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
           xdConnected: link.isConnected(),
           bridgeOperations: OP_KEYS,
           pluginCapabilities: link.pluginInfo.capabilities ?? null,
-          note: "XD's interactions module is read-only. Prototype connections can be inspected and validated, but not authored through the documented public plugin API.",
+          note: "Prototype inspection and validation are supported. Wire authoring is NOT: XD's interactions module is read-only and no documented public API creates, edits or deletes connections, so manual wiring in XD Prototype mode is required. MCP-assisted focusing, per-edge instructions and verification are supported (xd_prototype_plan / xd_prototype_prepare / xd_prototype_verify).",
         }),
     },
 
@@ -232,13 +233,104 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
     },
 
     xd_validate_prototype: {
-      description: "Compare required navigation edges with existing prototype connections. Read-only; does not create or modify wires.",
+      description: "Full prototype pass/fail report: expected vs detected edges, missing, incorrect (wrong destination/trigger/action), ambiguous and extra edges, with GUIDs and names. Read-only; never creates or modifies wires.",
       inputSchema: {
         type: "object",
         properties: { requiredConnections: { type: "array", minItems: 1, maxItems: 500, items: { type: "object", properties: { fromGuid: { type: "string" }, toGuid: { type: "string" }, trigger: { enum: ["tap", "drag", "time", "voice"] }, action: { enum: ["goToArtboard", "overlay"] } }, required: ["fromGuid", "toGuid"] } } },
         required: ["requiredConnections"],
       },
       handler: (a) => opCall(link, "validate_prototype", a),
+    },
+
+    xd_prototype_plan: {
+      description: "Resolve a prototype flow manifest (semantic names or GUIDs) against the live document: resolved source/target GUIDs, ambiguous or missing nodes, and a ready-to-wire order. Read-only; creates no wire.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          manifest: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "flow name, e.g. Main" },
+              home: { type: "string", description: "home artboard GUID or exact name" },
+              edges: {
+                type: "array", minItems: 1, maxItems: 500,
+                items: {
+                  type: "object",
+                  properties: {
+                    source: { type: "string", description: "source node GUID or exact semantic name, e.g. Home/PrimaryCTA" },
+                    target: { type: "string", description: "target artboard GUID or exact artboard name" },
+                    sourceRole: { type: "string", description: "human-readable role, echoed back in reports" },
+                    trigger: { enum: ["tap", "drag", "time", "voice"] },
+                    action: { enum: ["goToArtboard", "overlay"] },
+                    transition: { type: "object", properties: { type: { type: "string" }, duration: { type: "number", minimum: 0, maximum: 10 }, easing: { type: "string" } } },
+                    overlay: { type: "object", properties: { x: { type: "number" }, y: { type: "number" } } },
+                    preserveScrollPosition: { type: "boolean" },
+                    note: { type: "string" },
+                  },
+                  required: ["source", "target"],
+                },
+              },
+            },
+            required: ["edges"],
+          },
+        },
+        required: ["manifest"],
+      },
+      handler: async (a) => {
+        const validated = validateFlowManifest(a.manifest);
+        if (!validated.ok) return json({ ok: false, code: "invalid_manifest", error: validated.error }, true);
+        const resolved = await resolveFlowManifest(link, validated.manifest);
+        return json({
+          ...resolved,
+          authoringSupported: false,
+          wireCreated: false,
+          nextStep: resolved.stats.blockedCount > 0
+            ? "Resolve the reported problems before wiring; the plan returns diagnostics, it does not fix nodes."
+            : "For each ready edge: xd_prototype_prepare (queued — click Execute pending), wire it in XD Prototype mode, then xd_prototype_verify. Finish with xd_validate_prototype.",
+        });
+      },
+    },
+
+    xd_prototype_focus: {
+      description: "QUEUED (requires the panel's Execute pending click): select a node and pan XD's canvas to it inside application.editDocument. XD refuses selection writes from a background context. The immediate response is a queue acknowledgement; the executed result (focusState, viewport evidence) arrives in xd_get_operation_status. Creates no wire.",
+      inputSchema: {
+        type: "object",
+        properties: { guid: { type: "string" }, targetGuid: { type: "string", description: "optional intended destination artboard" } },
+        required: ["guid"],
+      },
+      handler: (a) => opCall(link, "prototype_focus", { guid: a.guid, targetGuid: a.targetGuid }),
+    },
+
+    xd_prototype_prepare: {
+      description: "QUEUED (requires the panel's Execute pending click): prepare ONE prototype connection inside application.editDocument — validates source and target, selects and pans to the source, reports already-wired / wrong-*-present, and returns the exact manual wiring instruction. focusState is focused | already-selected | selection-failed | focus-unverified. Never creates the wire.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sourceGuid: { type: "string" },
+          targetGuid: { type: "string" },
+          trigger: { enum: ["tap", "drag", "time", "voice"] },
+          action: { enum: ["goToArtboard", "overlay"] },
+          transition: { type: "object", properties: { type: { type: "string" }, duration: { type: "number", minimum: 0, maximum: 10 }, easing: { type: "string" } } },
+          overlay: { type: "object", properties: { x: { type: "number" }, y: { type: "number" } } },
+        },
+        required: ["sourceGuid", "targetGuid"],
+      },
+      handler: (a) => opCall(link, "prototype_prepare_connection", a),
+    },
+
+    xd_prototype_verify: {
+      description: "Verify ONE manually created wire against the live document: ok | missing | incomplete | wrong-destination | wrong-trigger | wrong-action | ambiguous. Read-only; a user claiming the wire exists is not evidence.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sourceGuid: { type: "string" },
+          targetGuid: { type: "string" },
+          trigger: { enum: ["tap", "drag", "time", "voice"] },
+          action: { enum: ["goToArtboard", "overlay"] },
+        },
+        required: ["sourceGuid", "targetGuid"],
+      },
+      handler: (a) => opCall(link, "prototype_verify_connection", a),
     },
 
     xd_audit_screen: {

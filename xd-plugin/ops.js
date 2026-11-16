@@ -575,6 +575,325 @@
     return runCommandForNodes([guid], commandName, 1);
   }
 
+  // --- prototype wiring assistant ---------------------------------------------
+  // XD's `interactions` module is READ-ONLY. No documented public API creates,
+  // edits or deletes a prototype wire, so nothing below authors one. These
+  // helpers only (a) read the real wires, (b) classify an expected edge against
+  // them, and (c) drive selection + viewport so a HUMAN can draw the wire in
+  // XD's Prototype workspace. Any code that claims to create a wire is lying.
+
+  /** Narrow a SceneNodeList/Array of nodes to their GUIDs, or null when unreadable. */
+  function readSelectionGuids() {
+    try {
+      const selection = scenegraph.selection;
+      if (!selection) return null;
+      const items = selection.items;
+      if (!items) return null;
+      const out = [];
+      const len = typeof items.length === "number" ? items.length : 0;
+      for (let i = 0; i < len; i++) {
+        const n = typeof items.at === "function" ? items.at(i) : items[i];
+        if (n && n.guid) out.push(n.guid);
+      }
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Nearest ancestor Artboard of a node (or the node itself). */
+  function artboardOf(node) {
+    let current = node;
+    while (current) {
+      if (isArtboard(current)) return current;
+      current = current.parent || null;
+    }
+    return null;
+  }
+
+  /**
+   * Read the documented viewport API. Returns availability + a snapshot of the
+   * evidence XD actually exposes: `bounds` and `zoomFactor` are read-only
+   * properties, and they are the only way to prove the view moved.
+   *
+   * Documented methods: scrollIntoView / scrollToCenter / zoomToRect.
+   */
+  function probeViewport() {
+    let viewport = null;
+    try {
+      viewport = require("viewport");
+    } catch (e) {
+      return { available: false, code: "viewport_unavailable", error: String(e && e.message ? e.message : e) };
+    }
+    if (!viewport) return { available: false, code: "viewport_unavailable" };
+    if (typeof viewport.scrollIntoView !== "function") {
+      return { available: false, code: "viewport_unsupported", api: "scrollIntoView" };
+    }
+    const state = { available: true, api: "scrollIntoView", bounds: null, zoomFactor: null };
+    try {
+      const b = viewport.bounds;
+      if (b && typeof b.x === "number" && typeof b.y === "number" && typeof b.width === "number" && typeof b.height === "number") {
+        state.bounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+      }
+    } catch (e) { /* bounds are optional evidence */ }
+    try {
+      if (typeof viewport.zoomFactor === "number") state.zoomFactor = viewport.zoomFactor;
+    } catch (e) { /* zoom is optional evidence */ }
+    return state;
+  }
+
+  function drawBoundsOf(node) {
+    const b = node && node.globalDrawBounds ? node.globalDrawBounds : null;
+    if (!b || typeof b.x !== "number") return null;
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  }
+
+  function fullyInside(inner, outer) {
+    return inner.x >= outer.x
+      && inner.y >= outer.y
+      && inner.x + inner.width <= outer.x + outer.width
+      && inner.y + inner.height <= outer.y + outer.height;
+  }
+
+  /**
+   * Pan the canvas to a node with the documented `viewport.scrollIntoView(node)`.
+   * `scrolled` is only true when `viewport.bounds` demonstrably changed; an API
+   * call that merely did not throw is never reported as movement.
+   */
+  function focusViewport(node) {
+    const before = probeViewport();
+    if (!before.available) {
+      return { scrolled: false, code: before.code, evidence: "none", api: "scrollIntoView" };
+    }
+    const nodeBounds = drawBoundsOf(node);
+    const alreadyInView = !!(nodeBounds && before.bounds && fullyInside(nodeBounds, before.bounds));
+
+    let viewport;
+    try {
+      viewport = require("viewport");
+    } catch (e) {
+      return { scrolled: false, code: "viewport_unavailable", evidence: "none", api: "scrollIntoView" };
+    }
+    try {
+      // Documented signature: scrollIntoView(node). Pass the resolved node, not a rect copy.
+      viewport.scrollIntoView(node);
+    } catch (e) {
+      return {
+        scrolled: false,
+        code: "viewport_error",
+        evidence: "call_failed",
+        api: "scrollIntoView",
+        error: String(e && e.message ? e.message : e),
+        before: { bounds: before.bounds, zoomFactor: before.zoomFactor },
+      };
+    }
+
+    const after = probeViewport();
+    const afterEvidence = after.available ? { bounds: after.bounds, zoomFactor: after.zoomFactor } : null;
+    const beforeEvidence = { bounds: before.bounds, zoomFactor: before.zoomFactor };
+
+    if (!before.bounds || !afterEvidence || !afterEvidence.bounds) {
+      return {
+        scrolled: false,
+        code: "viewport_change_unverified",
+        evidence: "none",
+        api: "scrollIntoView",
+        reason: "viewport.bounds is not readable, so movement cannot be verified",
+        before: beforeEvidence,
+        after: afterEvidence,
+      };
+    }
+
+    const moved = before.bounds.x !== afterEvidence.bounds.x || before.bounds.y !== afterEvidence.bounds.y;
+    if (moved) {
+      return { scrolled: true, code: "viewport_moved", evidence: "bounds", api: "scrollIntoView", before: beforeEvidence, after: afterEvidence };
+    }
+    return {
+      scrolled: false,
+      code: alreadyInView ? "already-in-view" : "viewport_change_unverified",
+      evidence: "bounds",
+      api: "scrollIntoView",
+      reason: alreadyInView
+        ? "the node was already fully inside viewport.bounds; scrollIntoView is documented to do nothing in that case"
+        : "scrollIntoView is a smooth pan and viewport.bounds had not changed on synchronous read-back; movement is not proven",
+      before: beforeEvidence,
+      after: afterEvidence,
+    };
+  }
+
+  /**
+   * Select one node and classify what the transaction observed.
+   *
+   * XD refuses `scenegraph.selection.items = [...]` outside editDocument, so this
+   * runs inside the panel's edit gate. Live testing showed a *selection-only*
+   * transaction persists after commit, but a selection followed by more work in
+   * the same transaction (a viewport pan) does not — so callers must run
+   * focusViewport() FIRST and leave this as the last scenegraph-affecting step.
+   *
+   * Even then, this can only observe the in-transaction state: the handler cannot
+   * see anything after commit. It therefore never claims "focused". Real focus
+   * confirmation is an independent `xd_get_selection` read after execution.
+   *
+   * focusState: selection-assigned | selection-failed | focus-unverified
+   */
+  function attemptSelection(node) {
+    const before = readSelectionGuids();
+    if (before === null) {
+      return {
+        focusState: "focus-unverified",
+        assignedTo: null,
+        selectedInTransaction: false,
+        wasSelectedBefore: false,
+        selectionError: "scenegraph.selection is not readable in this host",
+      };
+    }
+
+    let error = null;
+    try {
+      scenegraph.selection.items = [node];
+    } catch (e) {
+      error = String(e && e.message ? e.message : e);
+    }
+
+    const after = readSelectionGuids();
+    const selectedInTransaction = !!after && after.length === 1 && after[0] === node.guid;
+    const wasSelectedBefore = before.length === 1 && before[0] === node.guid;
+
+    if (error) {
+      return { focusState: "selection-failed", assignedTo: null, selectedInTransaction, wasSelectedBefore, selectionError: error };
+    }
+    if (!selectedInTransaction) {
+      return {
+        focusState: "selection-failed",
+        assignedTo: null,
+        selectedInTransaction: false,
+        wasSelectedBefore,
+        selectionError: "selection did not apply: read-back does not show the requested node",
+      };
+    }
+    return {
+      focusState: "selection-assigned",
+      assignedTo: node.guid,
+      selectedInTransaction: true,
+      wasSelectedBefore,
+      selectionError: null,
+    };
+  }
+
+  /** Guidance attached to every focus result: the handler cannot see post-commit state. */
+  const POST_COMMIT_CONFIRMATION = "read xd_get_selection after execution";
+
+
+
+  /** Normalised read of every wire XD currently has in this document. */
+  function readPrototypeEdges() {
+    let interactions;
+    try {
+      interactions = require("interactions");
+    } catch (e) {
+      return { ok: false, code: "unsupported", supported: false, error: "XD interactions module is unavailable in this host" };
+    }
+    const edges = [];
+    (interactions.allInteractions || []).forEach((entry) => {
+      (entry.interactions || []).forEach((interaction) => {
+        const action = interaction.action || {};
+        const destination = action.destination || action.overlay || null;
+        const transition = action.transition || null;
+        edges.push({
+          fromGuid: entry.triggerNode ? entry.triggerNode.guid : null,
+          fromName: entry.triggerNode ? entry.triggerNode.name : null,
+          toGuid: destination ? destination.guid : null,
+          toName: destination ? destination.name : null,
+          trigger: interaction.trigger ? interaction.trigger.type : null,
+          action: action.type || null,
+          transition: transition ? {
+            type: transition.type || null,
+            duration: typeof transition.duration === "number" ? transition.duration : null,
+            easing: transition.easing || null,
+          } : null,
+        });
+      });
+    });
+    return { ok: true, edges };
+  }
+
+  /**
+   * Classify one expected edge against the real wires.
+   * status: ok | missing | incomplete | wrong-destination | wrong-trigger | wrong-action | ambiguous
+   */
+  function classifyConnection(required, edges) {
+    const fromEdges = edges.filter((edge) => edge.fromGuid === required.fromGuid);
+    if (fromEdges.length === 0) return { status: "missing", matches: [], candidates: [] };
+    const toEdges = fromEdges.filter((edge) => edge.toGuid === required.toGuid);
+    if (toEdges.length === 0) {
+      const noDestination = fromEdges.every((edge) => !edge.toGuid);
+      return { status: noDestination ? "incomplete" : "wrong-destination", matches: [], candidates: fromEdges };
+    }
+    let narrowed = toEdges;
+    if (required.trigger) {
+      narrowed = toEdges.filter((edge) => edge.trigger === required.trigger);
+      if (narrowed.length === 0) return { status: "wrong-trigger", matches: [], candidates: toEdges };
+    }
+    if (required.action) {
+      narrowed = narrowed.filter((edge) => edge.action === required.action);
+      if (narrowed.length === 0) return { status: "wrong-action", matches: [], candidates: toEdges };
+    }
+    if (narrowed.length > 1) return { status: "ambiguous", matches: narrowed, candidates: narrowed };
+    return { status: "ok", matches: narrowed, candidates: narrowed };
+  }
+
+  function edgeLabel(edge) {
+    const from = edge.fromName || edge.fromGuid || "?";
+    const to = edge.toName || edge.toGuid || "(no destination)";
+    return from + " → " + to + " [" + (edge.trigger || "?") + " / " + (edge.action || "?") + "]";
+  }
+
+  /** Human instructions for the manual XD Prototype-mode step. Never a claim of authorship. */
+  function wireInstruction(source, target, trigger, action, transition, overlay) {
+    const sourceName = source.name || source.guid;
+    const targetName = target.name || target.guid;
+    const host = artboardOf(source);
+    const where = host ? " on artboard \"" + host.name + "\"" : "";
+    const actionLabel = action === "overlay" ? "Overlay" : "Transition → \"" + targetName + "\"";
+    const parts = [];
+    parts.push("In XD, switch to Prototype mode and confirm the source node is selected on the canvas.");
+    parts.push("Drag the blue connector from \"" + sourceName + "\"" + where + " onto artboard \"" + targetName + "\".");
+    parts.push("Set Trigger = " + trigger + ", Action = " + actionLabel + ".");
+    if (transition && transition.type) {
+      const duration = typeof transition.duration === "number" ? ", duration " + transition.duration + "s" : "";
+      const easing = transition.easing ? ", easing " + transition.easing : "";
+      parts.push("Transition = " + transition.type + duration + easing + ".");
+    }
+    if (overlay && (typeof overlay.x === "number" || typeof overlay.y === "number")) {
+      parts.push("Overlay position = (" + (overlay.x || 0) + ", " + (overlay.y || 0) + ").");
+    }
+    parts.push("This operation does not create the wire; it only prepares it.");
+    return parts.join(" ");
+  }
+
+  function guidanceForStatus(status, source, target, required) {
+    const from = source.name || source.guid;
+    const to = target.name || target.guid;
+    switch (status) {
+      case "ok":
+        return "Verified: " + from + " → " + to + " [" + required.trigger + " / " + required.action + "] exists in the document.";
+      case "missing":
+        return "No wire exists from " + from + ". Re-run prototype_prepare_connection and draw it in Prototype mode.";
+      case "wrong-destination":
+        return "A wire exists from " + from + " but it points somewhere other than " + to + ". Re-point it in XD's Prototype panel; no plugin API can edit it.";
+      case "wrong-trigger":
+        return "The wire reaches " + to + " but its trigger is not \"" + required.trigger + "\". Change the trigger in XD's Prototype panel.";
+      case "wrong-action":
+        return "The wire reaches " + to + " but its action is not \"" + required.action + "\". Change the action in XD's Prototype panel.";
+      case "incomplete":
+        return "A wire exists from " + from + " with no destination. Complete it in XD's Prototype panel.";
+      case "ambiguous":
+        return "More than one wire from " + from + " to " + to + " matches. Remove the duplicate(s) in XD's Prototype panel.";
+      default:
+        return "Unrecognised verification state: " + status;
+    }
+  }
+
   const handlers = {
     get_document_info: () => {
       const info = docInfo();
@@ -1238,6 +1557,184 @@
       return { ok: true, findings, usage: { colors: Object.fromEntries(colorUse), fontSizes: Object.fromEntries(sizeUse) } };
     },
 
+    prototype_focus: (p) => {
+      const sc = requireScene();
+      if (!sc.ok) return sc;
+      const found = requireNode(p.guid);
+      if (!found.ok) return found;
+      const node = found.node;
+      let target = null;
+      if (p.targetGuid) {
+        target = resolveNode(p.targetGuid);
+        if (!target) return { ok: false, code: "target_not_found", error: "target artboard not found: " + p.targetGuid };
+        if (!isArtboard(target)) {
+          return { ok: false, code: "target_not_artboard", error: "target is not an Artboard: " + p.targetGuid + " (" + (target.constructor ? target.constructor.name : "?") + ")" };
+        }
+      }
+      const host = artboardOf(node);
+      // Order matters: live XD discards a selection that is followed by further
+      // work in the same edit transaction. Pan first, select last.
+      const viewport = focusViewport(node);
+      const focus = attemptSelection(node);
+      return {
+        ok: true,
+        executed: true,
+        executedInEditContext: true,
+        createdWire: false,
+        authoringSupported: false,
+        selectionIsDocumentMutation: false,
+        source: {
+          guid: node.guid,
+          name: node.name,
+          role: node.name,
+          type: node.constructor ? node.constructor.name : "?",
+          frame: nodeSummary(node).frame,
+        },
+        artboard: host ? { guid: host.guid, name: host.name } : null,
+        target: target ? { guid: target.guid, name: target.name } : null,
+        focusState: focus.focusState,
+        assignedTo: focus.assignedTo,
+        selectedInTransaction: focus.selectedInTransaction,
+        wasSelectedBefore: focus.wasSelectedBefore,
+        selectionError: focus.selectionError,
+        confirmationRequired: POST_COMMIT_CONFIRMATION,
+        viewport,
+        nextStep: target
+          ? "Wire \"" + (node.name || node.guid) + "\" → \"" + target.name + "\" in XD Prototype mode, then verify with prototype_verify_connection."
+          : "Pick the destination artboard in XD Prototype mode, then verify with prototype_verify_connection.",
+      };
+    },
+
+    prototype_prepare_connection: (p) => {
+      const sc = requireScene();
+      if (!sc.ok) return sc;
+      const sourceResult = requireNode(p.sourceGuid);
+      if (!sourceResult.ok) return { ok: false, code: "node_not_found", error: "source node not found: " + p.sourceGuid };
+      const targetResult = requireNode(p.targetGuid);
+      if (!targetResult.ok) return { ok: false, code: "target_not_found", error: "target artboard not found: " + p.targetGuid };
+      const source = sourceResult.node;
+      const target = targetResult.node;
+      if (!isArtboard(target)) {
+        return { ok: false, code: "target_not_artboard", error: "target must be an Artboard: " + p.targetGuid + " (" + (target.constructor ? target.constructor.name : "?") + ")" };
+      }
+
+      const trigger = p.trigger || "tap";
+      const action = p.action || "goToArtboard";
+      const required = { fromGuid: source.guid, toGuid: target.guid, trigger, action };
+
+      const state = readPrototypeEdges();
+      if (!state.ok) return state;
+      const verdict = classifyConnection(required, state.edges);
+      const alreadyWired = verdict.status === "ok";
+
+      let focus;
+      let viewport;
+      if (alreadyWired) {
+        const current = readSelectionGuids();
+        const selectedNow = !!current && current.length === 1 && current[0] === source.guid;
+        focus = { focusState: "not-attempted", assignedTo: null, selectedInTransaction: selectedNow, wasSelectedBefore: selectedNow, selectionError: null };
+        viewport = { scrolled: false, code: "not-attempted", evidence: "none", api: "scrollIntoView", reason: "the wire already exists, so the canvas was left alone" };
+      } else {
+        // Pan first, select last: XD drops a selection that is followed by more
+        // work in the same edit transaction.
+        viewport = focusViewport(source);
+        focus = attemptSelection(source);
+      }
+      const host = artboardOf(source);
+
+      let status = "ready";
+      let instruction;
+      if (alreadyWired) {
+        status = "already-wired";
+        instruction = "This connection already exists (" + edgeLabel(verdict.matches[0]) + "). Nothing to wire.";
+      } else {
+        if (verdict.status === "wrong-destination") status = "wrong-wire-present";
+        else if (verdict.status === "wrong-trigger") status = "wrong-trigger-present";
+        else if (verdict.status === "wrong-action") status = "wrong-action-present";
+        else if (verdict.status === "incomplete") status = "incomplete-wire-present";
+        else if (verdict.status === "ambiguous") status = "ambiguous-wire-present";
+        instruction = wireInstruction(source, target, trigger, action, p.transition, p.overlay);
+        if (focus.focusState === "selection-failed" || focus.focusState === "focus-unverified") {
+          instruction = "Select \"" + (source.name || source.guid) + "\" on the canvas first (automatic selection did not apply), then " + instruction;
+        }
+        if (verdict.candidates.length > 0) {
+          instruction += " Existing wire(s) from this node: " + verdict.candidates.map(edgeLabel).join("; ") + ".";
+        }
+      }
+
+      return {
+        ok: true,
+        executed: true,
+        executedInEditContext: true,
+        createdWire: false,
+        authoringSupported: false,
+        selectionIsDocumentMutation: false,
+        status,
+        connection: {
+          source: {
+            guid: source.guid,
+            name: source.name,
+            type: source.constructor ? source.constructor.name : "?",
+            artboard: host ? { guid: host.guid, name: host.name } : null,
+          },
+          target: { guid: target.guid, name: target.name },
+          trigger,
+          action,
+          transition: p.transition || null,
+        },
+        verdict: { status: verdict.status, candidates: verdict.candidates },
+        focusState: focus.focusState,
+        assignedTo: focus.assignedTo,
+        selectedInTransaction: focus.selectedInTransaction,
+        wasSelectedBefore: focus.wasSelectedBefore,
+        selectionError: focus.selectionError,
+        confirmationRequired: POST_COMMIT_CONFIRMATION,
+        viewport,
+        instruction,
+        checklist: alreadyWired ? [] : [
+          "1. Switch XD to Prototype mode.",
+          "2. Drag the blue connector from \"" + (source.name || source.guid) + "\" to artboard \"" + target.name + "\".",
+          "3. Set Trigger = " + trigger + ", Action = " + (action === "overlay" ? "Overlay" : "Transition → " + target.name) + ".",
+          "4. Verify with prototype_verify_connection: a drag that silently failed looks identical to one that worked.",
+        ],
+      };
+    },
+
+    prototype_verify_connection: (p) => {
+      const sc = requireScene();
+      if (!sc.ok) return sc;
+      const sourceResult = requireNode(p.sourceGuid);
+      if (!sourceResult.ok) return { ok: false, code: "node_not_found", error: "source node not found: " + p.sourceGuid };
+      const targetResult = requireNode(p.targetGuid);
+      if (!targetResult.ok) return { ok: false, code: "target_not_found", error: "target artboard not found: " + p.targetGuid };
+      const source = sourceResult.node;
+      const target = targetResult.node;
+      const required = {
+        fromGuid: source.guid,
+        toGuid: target.guid,
+        trigger: p.trigger || "tap",
+        action: p.action || "goToArtboard",
+      };
+      const state = readPrototypeEdges();
+      if (!state.ok) return state;
+      const verdict = classifyConnection(required, state.edges);
+      const host = artboardOf(source);
+      return {
+        ok: true,
+        verified: verdict.status === "ok",
+        status: verdict.status,
+        authoringSupported: false,
+        createdWire: false,
+        required,
+        source: { guid: source.guid, name: source.name, artboard: host ? { guid: host.guid, name: host.name } : null },
+        target: { guid: target.guid, name: target.name },
+        matches: verdict.matches,
+        candidates: verdict.candidates,
+        checkedAt: Date.now(),
+        guidance: guidanceForStatus(verdict.status, source, target, required),
+      };
+    },
+
     get_prototype_state: () => {
       const sc = requireScene();
       if (!sc.ok) return sc;
@@ -1289,39 +1786,85 @@
     validate_prototype: (p) => {
       const sc = requireScene();
       if (!sc.ok) return sc;
-      let interactions;
-      try {
-        interactions = require("interactions");
-      } catch (e) {
-        return { ok: false, code: "unsupported", supported: false, error: "XD interactions module is unavailable in this host" };
-      }
-      const actual = [];
-      (interactions.allInteractions || []).forEach((entry) => {
-        (entry.interactions || []).forEach((interaction) => {
-          const action = interaction.action || {};
-          const destination = action.destination || action.overlay || null;
-          actual.push({
-            fromGuid: entry.triggerNode && entry.triggerNode.guid,
-            toGuid: destination && destination.guid,
-            trigger: interaction.trigger && interaction.trigger.type,
-            action: action.type,
-          });
-        });
-      });
-      const checked = (p.requiredConnections || []).map((required) => {
+      const state = readPrototypeEdges();
+      if (!state.ok) return state;
+      const actual = state.edges;
+      const requiredList = p.requiredConnections || [];
+
+      const checked = requiredList.map((required) => {
         const fromNode = resolveNode(required.fromGuid);
         const toNode = resolveNode(required.toGuid);
-        const match = actual.find((edge) => edge.fromGuid === required.fromGuid
-          && edge.toGuid === required.toGuid
-          && (!required.trigger || edge.trigger === required.trigger)
-          && (!required.action || edge.action === required.action));
+        const verdict = classifyConnection(required, actual);
         const problems = [];
         if (!fromNode) problems.push("source-node-missing");
         if (!toNode || !isArtboard(toNode)) problems.push("destination-artboard-missing");
-        if (!match) problems.push("connection-missing");
-        return { required, ok: problems.length === 0, problems };
+        if (verdict.status !== "ok") problems.push("connection-missing");
+        return {
+          required,
+          ok: problems.length === 0,
+          problems,
+          status: verdict.status,
+          source: fromNode ? { guid: fromNode.guid, name: fromNode.name, type: fromNode.constructor ? fromNode.constructor.name : "?" } : null,
+          target: toNode ? { guid: toNode.guid, name: toNode.name } : null,
+          matches: verdict.matches,
+          candidates: verdict.candidates,
+        };
       });
-      return { ok: true, valid: checked.every((item) => item.ok), results: checked, actualConnectionCount: actual.length, authoringSupported: false };
+
+      const edgeMatches = (expected, edge) => edge.fromGuid === expected.fromGuid
+        && edge.toGuid === expected.toGuid
+        && (!expected.trigger || edge.trigger === expected.trigger)
+        && (!expected.action || edge.action === expected.action);
+
+      const extra = actual.filter((edge) => !requiredList.some((expected) => edgeMatches(expected, edge)));
+      const missing = checked.filter((item) => item.status === "missing").map((item) => item.required);
+      const incorrect = checked
+        .filter((item) => item.status !== "ok" && item.status !== "missing")
+        .map((item) => ({ required: item.required, status: item.status, candidates: item.candidates }));
+      const expected = checked.map((item) => ({
+        fromGuid: item.required.fromGuid,
+        fromName: item.source ? item.source.name : null,
+        toGuid: item.required.toGuid,
+        toName: item.target ? item.target.name : null,
+        trigger: item.required.trigger || null,
+        action: item.required.action || null,
+        status: item.status,
+        ok: item.ok,
+      }));
+      const detected = actual.map((edge) => ({
+        fromGuid: edge.fromGuid,
+        fromName: edge.fromName || null,
+        toGuid: edge.toGuid,
+        toName: edge.toName || null,
+        trigger: edge.trigger,
+        action: edge.action,
+        transition: edge.transition,
+      }));
+
+      const okCount = checked.filter((item) => item.ok).length;
+      const valid = checked.every((item) => item.ok);
+      return {
+        ok: true,
+        valid,
+        verdict: valid ? "pass" : "fail",
+        authoringSupported: false,
+        expected,
+        detected,
+        missing,
+        incorrect,
+        extra,
+        results: checked,
+        summary: {
+          expectedCount: checked.length,
+          detectedCount: actual.length,
+          okCount,
+          missingCount: missing.length,
+          incorrectCount: incorrect.length,
+          extraCount: extra.length,
+          coverage: checked.length === 0 ? 0 : Number((okCount / checked.length).toFixed(3)),
+        },
+        actualConnectionCount: actual.length,
+      };
     },
 
     audit_screen: (p) => {
@@ -1462,7 +2005,11 @@
     },
   };
 
-  const nonMutating = new Set(["get_document_info", "get_artboards", "get_selection", "inspect_node", "search_nodes", "create_component", "create_component_variants", "inspect_design_consistency", "get_prototype_state", "validate_prototype", "audit_screen", "export_artboard", "export_selection", "validate_document"]);
+  // prototype_focus / prototype_prepare_connection mutate XD selection, which XD refuses
+  // outside editDocument ("not permitted to make changes from the background"). They must
+  // therefore travel through the panel queue like any other edit-gated operation.
+  // prototype_verify_connection only reads.
+  const nonMutating = new Set(["get_document_info", "get_artboards", "get_selection", "inspect_node", "search_nodes", "create_component", "create_component_variants", "inspect_design_consistency", "get_prototype_state", "validate_prototype", "prototype_verify_connection", "audit_screen", "export_artboard", "export_selection", "validate_document"]);
   const mutateOps = new Set(Object.keys(handlers).filter((op) => !nonMutating.has(op)));
   window.__xdBridgeOps = { handlers, mutateOps, nonMutating };
   console.log("BOOT: ops registered (" + Object.keys(handlers).length + " handlers) on window.__xdBridgeOps");

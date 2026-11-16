@@ -1,16 +1,15 @@
 # Testing
 
-## Automated test suite (passing: 156/156, 2026-11-11)
+## Automated test suite (passing: 191/191, 2026-11-16)
 
 Run from `bridge/`:
 
 ```powershell
 & C:\Users\Omar\AppData\Local\mise\installs\node\26.13.0\node.exe --test --test-timeout=30000 `
-  ..\tests\mcp.test.ts ..\tests\protocol.test.ts ..\tests\plugin-ops.test.ts `
-  ..\tests\agent-contract.test.ts ..\tests\agent-workflow.test.ts
+  ..\tests\*.test.ts
 ```
 
-### tests/agent-contract.test.ts (11 tests) — agent/skill policy lint
+### tests/agent-contract.test.ts (12 tests) — agent/skill policy lint
 
 Asserts the global agent contract stays honest and complete: both modes + self-recursion blocked,
 the 14-state machine in order, forbidden `QUEUE → READ_BACK` shortcuts, `Execute pending`
@@ -50,7 +49,7 @@ bridge envelope, a fake document, read-back and evidence levels.
 gates*, not live rendering, fonts, or the plugin's `editDocument` timing. Only the live checklist
 below can establish LEVEL 5 against real Adobe XD.
 
-### tests/plugin-ops.test.ts (55 tests) — real plugin handlers, fake XD runtime
+### tests/plugin-ops.test.ts (83 tests) — real plugin handlers, fake XD runtime
 
 Loads the actual `xd-plugin/ops.js` in a `vm` sandbox with a functional fake scenegraph
 (`application`, `scenegraph`, `commands`, `uxp` all mocked). No real XD API is contacted; write
@@ -63,17 +62,18 @@ paths mutate the fake tree only.
 | Creation | artboards, rectangle, ellipse, line, polygon, path, ImageFill, picker import (mock picker), text; group and mask-group commands |
 | Mutation | update, move/resize, rotate, delete, duplicate, leaf reparent, ungroup, arrange/align/distribute, gradients/stroke effects, styles, text, tokens |
 | Query/audit | search, validate document, consistency, semantic screen-role audit, prototype flow/edge inspection and required-edge validation |
+| Prototype focus | selection rejected in a background context, applied through `editDocument`, `already-selected` vs `focused`, `selection-failed`/`focus-unverified`, error/focused exclusivity, `scrollIntoView(node)`, evidence-based `scrolled`, `already-in-view`, unsupported/unavailable viewport, queue routing |
 | Export | `export_artboard` (rendition node/scale, base64, cleanup), `export_selection`, empty selection |
 | Failure modes | missing document, missing root, malformed root → structured errors for every scene-dependent op |
 | Regression | no handler reads `activeDocument.root`, `.path` or `.modified` (instrumented getters at 0) |
 | Live shape | `children` as a `SceneNodeList` (not an Array, no `[i]` access) — all handlers still work |
-| Contract | 40 handlers / 14 read-only; batch abort/async import semantics; diagnostics off by default and privacy-safe |
+| Contract | 53 handlers / 15 read-only; focus/prepare are queued because XD refuses background selection writes; batch abort/async import semantics; diagnostics off by default and privacy-safe |
 
 ### tests/mcp.test.ts (11 tests) — MCP end-to-end, mock XD plugin
 
 | Test | Verifies |
 |---|---|
-| MCP handshake and tool discovery | initialize returns protocol 2025-06-18; all 47 `xd_*` tools listed |
+| MCP handshake and tool discovery | initialize returns protocol 2025-06-18; all 60 `xd_*` tools listed |
 | xd_health | bridge status, port, plugin connected (mock) |
 | xd_execute_batch e2e | artboard + rectangle creation flows through MCP → WS → plugin, guids returned |
 | invalid operations rejected | unknown op, non-numeric frame, invalid hex color, unknown tool → structured errors before execution |
@@ -84,6 +84,21 @@ paths mutate the fake tree only.
 | xd_apply_design_tokens | contrast report computed (AA pass ≥ 4.5:1, bad pair < 2.5:1) |
 | capabilities + op status | capability list, bridge request depth, last event |
 | token file | exists, `xdbr-` prefix, ≥ 30 chars |
+
+### tests/prototype-wiring.test.ts (12 tests) — flow manifest + assisted wiring
+
+The pure manifest validator is tested directly; the MCP tools run end-to-end against the mock
+plugin's deterministic 3-screen fixture (one pre-existing wire).
+
+| Area | Verifies |
+|---|---|
+| Manifest validation | semantic names preserved; GUID sources; transition/overlay detail; rejects empty edges, bad trigger/action, duration > 10 s, non-numeric overlay, non-boolean scroll, > 500 edges |
+| `xd_prototype_plan` | semantic names resolve to real GUIDs (`resolvedBy:"name"`), `stats.readyCount`, `home` resolution; unknown source/target reported as `source-not-found` / `target-not-found` rather than guessed; invalid manifest rejected before any XD call |
+| `xd_prototype_focus` | selects and reports `focused:true`, `createdWire:false` |
+| `xd_prototype_prepare` | `already-wired` for the existing wire, `ready` + 4-step checklist for the missing one, `wrong-destination` surfaced; always `createdWire:false` |
+| `xd_prototype_verify` | `ok` / `missing` / `wrong-trigger` verdicts from real read-back |
+| `xd_validate_prototype` | `verdict:"fail"`, `summary.coverage:0.5` and `missing[]` for a partial flow; `verdict:"pass"` when complete |
+| Discovery | the four prototype tools are listed and `xd_prototype_prepare` states it never creates the wire |
 
 ### tests/protocol.test.ts (7 tests) — wire protocol, real WS server
 

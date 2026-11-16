@@ -2,10 +2,10 @@
 
 **A local-first MCP bridge that lets an AI design agent build real, editable Adobe XD documents — plus a design-asset intelligence layer for icons, type and component patterns.**
 
-[![Tests](https://img.shields.io/badge/tests-156%2F156-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-191%2F191-brightgreen)](#testing)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.6-blueviolet)](#the-xd-plugin)
-[![MCP tools](https://img.shields.io/badge/MCP%20tools-67-blue)](#mcp-tool-surface)
+[![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.10-blueviolet)](#the-xd-plugin)
+[![MCP tools](https://img.shields.io/badge/MCP%20tools-71-blue)](#mcp-tool-surface)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A522.6-339933)](#requirements)
 [![Transport](https://img.shields.io/badge/transport-127.0.0.1%20only-lightgrey)](#security-model)
 
@@ -37,7 +37,7 @@ Two hard rules shape the architecture:
              │ tools                                           │
 ┌────────────▼──────────────────────────┐                       │
 │  bridge (Node.js, TypeScript)         │                       │
-│  ├ tools.ts        67 MCP tools       │                       │
+│  ├ tools.ts        71 MCP tools       │                       │
 │  ├ operations.ts   whitelist + schema │                       │
 │  ├ assets/         registry · search  │                       │
 │  │                 cache · svg · ctx  │                       │
@@ -46,7 +46,7 @@ Two hard rules shape the architecture:
              │ ws://127.0.0.1:27183 (token auth)                │
 ┌────────────▼──────────────────────────┐                       │
 │  XD plugin (UXP panel, plain JS)      │                       │
-│  ├ ops.js       50 document operations│                       │
+│  ├ ops.js       53 document operations│                       │
 │  ├ executor.js  batch driver, 1 settle│                       │
 │  └ main.js      queue, UI, reconnect  │                       │
 └────────────┬──────────────────────────┘                       │
@@ -63,7 +63,7 @@ validation, orchestration and assets; the agent owns design judgement.
 
 ## Features
 
-### Real XD document operations (50)
+### Real XD document operations (53)
 
 | Area | Operations |
 |---|---|
@@ -74,6 +74,30 @@ validation, orchestration and assets; the agent owns design judgement.
 | Structure | duplicate, delete, ungroup, make/replace stack background |
 | Output | artboard/selection PNG export, document validation, design-consistency audit |
 | Assets | image fill, image replace, native file import |
+| Prototype | flow-manifest resolution, node focus/scroll, per-edge preparation and verification, full pass/fail report — inspection and validation only; XD cannot author wires |
+
+### Prototype wiring assistant (4 tools)
+
+XD's public plugin API cannot create, edit or delete a prototype wire. This
+assistant removes the search-and-click work without pretending otherwise:
+
+- **`xd_prototype_plan`** resolves a flow manifest of semantic names
+  (`Home/PrimaryCTA → Details`) into real GUIDs, reporting `source-not-found`,
+  `source-ambiguous` and `target-not-found` before anyone starts wiring.
+- **`xd_prototype_focus` / `xd_prototype_prepare`** select the source node and pan
+  the canvas to it, then return the exact instruction for the manual drag. One
+  connection at a time. These are **queued** edits: XD refuses
+  `scenegraph.selection.items = [...]` from a background context, so they run
+  inside `editDocument` after the panel's Execute pending click. Panning uses
+  `viewport.scrollIntoView(node)`, and `scrolled` is only true when
+  `viewport.bounds` actually changed.
+- **`xd_prototype_verify`** returns a per-edge verdict: `ok`, `missing`,
+  `incomplete`, `wrong-destination`, `wrong-trigger`, `wrong-action` or `ambiguous`.
+- **`xd_validate_prototype`** produces the final pass/fail report — expected vs
+  detected edges, missing, incorrect and extra connections, with GUIDs and names.
+
+Every one of these reports `authoringSupported:false` and `createdWire:false`.
+See [`docs/prototype-wiring-workflow.md`](docs/prototype-wiring-workflow.md).
 
 ### Design asset intelligence (11 tools)
 
@@ -153,7 +177,7 @@ the next interaction inside the panel (`Auto-apply` is on by default), or via
 
 ## MCP tool surface
 
-**67 tools**, all validated before they reach XD.
+**71 tools**, all validated before they reach XD.
 
 | Prefix | Count | Purpose |
 |---|---|---|
@@ -169,7 +193,7 @@ Highlights: `xd_execute_batch` (whole screen in one undo step),
 
 ## The XD plugin
 
-Version **1.0.6**. Plain JavaScript, no build step, no external libraries.
+Version **1.0.10**. Plain JavaScript, no build step, no external libraries.
 
 - **Execution gate** — `application.editDocument` only runs from a panel UI
   event; the panel drains the queue in one transaction (single undo entry).
@@ -191,7 +215,7 @@ cd bridge
 node --test ..\tests\*.test.ts
 ```
 
-**156/156 passing**, covering:
+**191/191 passing**, covering:
 
 - MCP protocol, tool registry, argument validation
 - Plugin handlers against a fake XD runtime (incl. `SceneNodeList` semantics)
@@ -223,7 +247,7 @@ See `SECURITY.md`.
 ```
 bridge/            MCP server + asset layer (TypeScript)
   src/assets/      registry · sources · search · cache · svg · pathdata · context
-  src/tools.ts     67 MCP tools
+  src/tools.ts     71 MCP tools
   src/operations.ts validated operation registry
 xd-plugin/         UXP panel (manifest, ops.js, executor.js, main.js, index.html)
 tests/             node:test suites
@@ -238,6 +262,7 @@ examples/          sample design payloads
 | Document | Contents |
 |---|---|
 | `docs/asset-intelligence.md` | asset sources, licensing, search, caching, XD insertion |
+| `docs/prototype-wiring-workflow.md` | flow manifest schema, assisted wiring pipeline, verification states |
 | `docs/mcp-operation-schema.md` | every tool and its parameters |
 | `docs/xd-capability-matrix.md` | what XD's API can and cannot do |
 | `ARCHITECTURE.md` | internals and design decisions |
@@ -248,9 +273,11 @@ examples/          sample design payloads
 ## Status & scope
 
 This is a private engineering project, not a product. Adobe XD's public plugin
-API has hard limits — no component masters, no prototype wiring authoring, no
-gradient-on-text, no viewport control — and the bridge reports those honestly
-instead of simulating them.
+API has hard limits - no component masters, no prototype wiring authoring, no
+gradient-on-text - and the bridge reports those honestly instead of simulating
+them. Prototype work is therefore *assisted*: the bridge resolves the flow,
+moves the canvas to the right node and verifies each wire after you draw it,
+but it never claims to have created one.
 
 ## License
 

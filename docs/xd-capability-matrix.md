@@ -82,9 +82,12 @@
 
 | Capability | Status | Tool / boundary |
 |---|---|---|
-| Read flows, interactions, triggers, actions, destinations, transitions | Source + mocked | New read-only `xd_get_prototype_state` backed by official `interactions.flows` / `allInteractions`. Not yet live verified. |
-| Audit required user-flow edges against existing wires | Source + mocked | New read-only `xd_validate_prototype`; reports missing source/destination/connection. Not yet live verified. |
-| Create / edit / delete wires or transitions | **Unavailable through documented public UXP API** | Official interactions module is read-only; no commands setter exists in the documented API. Use XD Prototype UI manually; do not claim clickable connections from a flow spec. |
+| Read flows, interactions, triggers, actions, destinations, transitions | Source + mocked | Read-only `xd_get_prototype_state` backed by official `interactions.flows` / `allInteractions`. Not yet live verified. |
+| Resolve a flow manifest (semantic names → GUIDs) | Source + mocked | Read-only `xd_prototype_plan`; reports `source-not-found`, `source-ambiguous`, `target-not-found`. Not yet live verified. |
+| Focus the source node for manual wiring | Source + mocked; **live constraint confirmed** | `xd_prototype_focus` / `xd_prototype_prepare` are **queued edits**: live XD rejects `scenegraph.selection.items = [...]` outside `editDocument`. Live testing also showed the selection only survives the commit when it is the **last** scenegraph-affecting step, so the pan happens first and the select last. The op returns `focusState:"selection-assigned"` and never `focused`; focus is confirmed only by an independent post-commit `xd_get_selection`. |
+| Per-connection preparation and verdicts | Source + mocked | `xd_prototype_prepare` (focus + instruction + `already-wired`/`wrong-*-present`) and `xd_prototype_verify` (`ok`/`missing`/`incomplete`/`wrong-destination`/`wrong-trigger`/`wrong-action`/`ambiguous`). |
+| Full prototype pass/fail report | Source + mocked | `xd_validate_prototype` returns `expected`, `detected`, `missing`, `incorrect`, `extra`, `summary.coverage` and `verdict`. |
+| Create / edit / delete wires or transitions | **Unavailable through documented public UXP API** | Official interactions module is read-only; no commands setter exists in the documented API. Manual wiring in XD Prototype mode is required. Every prototype tool reports `authoringSupported:false` / `createdWire:false`; never claim a wire exists without `xd_prototype_verify` or `xd_validate_prototype` evidence. |
 
 ## Structural / semantic quality
 

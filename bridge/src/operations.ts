@@ -724,7 +724,7 @@ export const OPERATIONS: Record<string, OpSpec> = {
   },
   validate_prototype: {
     op: "validate_prototype",
-    description: "Compare required navigation edges with existing XD prototype interactions. Read-only; it does not create wires.",
+    description: "Full prototype pass/fail report: expected vs detected edges, missing, incorrect (wrong destination/trigger/action), ambiguous and extra edges, with source/target GUIDs and names. Read-only; it never creates a wire.",
     mutating: false,
     validate: (p) => {
       if (!Array.isArray(p.requiredConnections) || p.requiredConnections.length === 0 || p.requiredConnections.length > 500) return { ok: false, error: "requiredConnections must be a non-empty array (max 500)" };
@@ -744,6 +744,84 @@ export const OPERATIONS: Record<string, OpSpec> = {
       return { ok: true, params: { requiredConnections } };
     },
     preview: (p) => `validate_prototype ${(p.requiredConnections as unknown[])?.length ?? 0} required connections`,
+  },
+  prototype_focus: {
+    op: "prototype_focus",
+    description: "Queued edit-gated op: select a node and pan XD's canvas to it inside application.editDocument so a human can draw a prototype wire. XD rejects selection writes from a background context. Creates no wire.",
+    mutating: true,
+    validate: (p) => {
+      const g = optGuid(p, "guid");
+      if (g.error) return { ok: false, error: g.error };
+      if (!g.value) return { ok: false, error: "guid is required" };
+      const t = optGuid(p, "targetGuid");
+      if (t.error) return { ok: false, error: t.error };
+      return { ok: true, params: clean({ guid: g.value, targetGuid: t.value }) };
+    },
+    preview: (p) => `prototype_focus ${String(p.guid)}${p.targetGuid ? " → " + String(p.targetGuid) : ""} (queued: requires Execute pending)`,
+  },
+  prototype_prepare_connection: {
+    op: "prototype_prepare_connection",
+    description: "Queued edit-gated op: prepare ONE prototype connection inside application.editDocument — validate source + target, select and pan to the source, report whether the wire already exists, return the manual instruction. Creates no wire.",
+    mutating: true,
+    validate: (p) => {
+      const s = optGuid(p, "sourceGuid");
+      if (s.error) return { ok: false, error: s.error };
+      if (!s.value) return { ok: false, error: "sourceGuid is required" };
+      const t = optGuid(p, "targetGuid");
+      if (t.error) return { ok: false, error: t.error };
+      if (!t.value) return { ok: false, error: "targetGuid is required" };
+      if (p.trigger !== undefined && !["tap", "drag", "time", "voice"].includes(p.trigger as string)) return { ok: false, error: "trigger must be tap|drag|time|voice" };
+      if (p.action !== undefined && !["goToArtboard", "overlay"].includes(p.action as string)) return { ok: false, error: "action must be goToArtboard|overlay" };
+      let transition: OpParams | undefined;
+      if (p.transition !== undefined) {
+        if (typeof p.transition !== "object" || p.transition === null) return { ok: false, error: "transition must be an object" };
+        const tr = p.transition as Record<string, unknown>;
+        if (tr.type !== undefined && (typeof tr.type !== "string" || tr.type.length > 64)) return { ok: false, error: "transition.type must be a string (max 64)" };
+        if (tr.easing !== undefined && (typeof tr.easing !== "string" || tr.easing.length > 64)) return { ok: false, error: "transition.easing must be a string (max 64)" };
+        const durationError = num(tr.duration, "transition.duration", { min: 0, max: 10 });
+        if (durationError) return { ok: false, error: durationError };
+        transition = clean({ type: tr.type, duration: tr.duration, easing: tr.easing }) as OpParams;
+      }
+      let overlay: OpParams | undefined;
+      if (p.overlay !== undefined) {
+        if (typeof p.overlay !== "object" || p.overlay === null) return { ok: false, error: "overlay must be an object {x?,y?}" };
+        const ov = p.overlay as Record<string, unknown>;
+        for (const key of ["x", "y"] as const) {
+          const e = num(ov[key], `overlay.${key}`);
+          if (e) return { ok: false, error: e };
+        }
+        overlay = clean({ x: ov.x, y: ov.y }) as OpParams;
+      }
+      return {
+        ok: true,
+        params: clean({
+          sourceGuid: s.value,
+          targetGuid: t.value,
+          trigger: p.trigger,
+          action: p.action,
+          transition,
+          overlay,
+        }),
+      };
+    },
+    preview: (p) => `prototype_prepare_connection ${String(p.sourceGuid)} → ${String(p.targetGuid)}`,
+  },
+  prototype_verify_connection: {
+    op: "prototype_verify_connection",
+    description: "Verify ONE manually created prototype wire against the document: ok | missing | incomplete | wrong-destination | wrong-trigger | wrong-action | ambiguous. Read-only.",
+    mutating: false,
+    validate: (p) => {
+      const s = optGuid(p, "sourceGuid");
+      if (s.error) return { ok: false, error: s.error };
+      if (!s.value) return { ok: false, error: "sourceGuid is required" };
+      const t = optGuid(p, "targetGuid");
+      if (t.error) return { ok: false, error: t.error };
+      if (!t.value) return { ok: false, error: "targetGuid is required" };
+      if (p.trigger !== undefined && !["tap", "drag", "time", "voice"].includes(p.trigger as string)) return { ok: false, error: "trigger must be tap|drag|time|voice" };
+      if (p.action !== undefined && !["goToArtboard", "overlay"].includes(p.action as string)) return { ok: false, error: "action must be goToArtboard|overlay" };
+      return { ok: true, params: clean({ sourceGuid: s.value, targetGuid: t.value, trigger: p.trigger, action: p.action }) };
+    },
+    preview: (p) => `prototype_verify_connection ${String(p.sourceGuid)} → ${String(p.targetGuid)}`,
   },
   audit_screen: {
     op: "audit_screen",

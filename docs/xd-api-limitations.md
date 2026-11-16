@@ -26,8 +26,24 @@ Official [`interactions` reference](https://developer.adobe.com/xd/uxp/develop/r
 describes its module as **read-only**. It exposes `flows`, `allInteractions`, node
 `triggeredInteractions`, and artboard `incomingInteractions`, including trigger/action/transition
 details. The official `commands` reference has no wire-authoring command. No supported public XD
-UXP API to create, modify, or delete wires was found. The bridge can therefore inspect/validate
-existing flows, but prototype connections still require manual work in XD's Prototype workspace.
+UXP API to create, modify, or delete wires was found.
+
+What the bridge therefore implements is a **wiring assistant**, not an authoring API:
+
+| Capability | Status |
+|---|---|
+| Prototype inspection (`xd_get_prototype_state`) | Supported |
+| Prototype validation (`xd_validate_prototype`) | Supported |
+| Wire authoring through the public XD API | **Unsupported — no API exists** |
+| Manual wiring in XD Prototype mode | **Required** |
+| MCP-assisted focusing, per-edge guidance and verification (`xd_prototype_plan`, `xd_prototype_prepare`, `xd_prototype_verify`) | Supported |
+| `xd_prototype_focus` / `xd_prototype_prepare` executed immediately | **Not possible** — XD refuses background selection writes; they are queued edits |
+
+The assistant uses only documented APIs: `scenegraph.selection.items` (writable **only inside
+`editDocument`**, hence the queue) and `viewport.scrollIntoView(node)`, with `viewport.bounds` and
+`viewport.zoomFactor` as the only readable proof that the view moved. Selection is confirmed by
+read-back and reported as `focusState`; viewport movement is reported as `scrolled:true` only when
+`bounds` actually changed. Every tool returns `authoringSupported:false` and `createdWire:false`.
 Do not use undocumented internal state or simulated UI automation to claim otherwise.
 
 ## Component boundary
@@ -46,8 +62,10 @@ structures but **not linked component masters**; token `pluginData` is not a nat
   import is broader than ImageFill, but SVG is not among `application.import`'s documented types.
 - `xd_get_operation_status` exposes bridge requests and last execution event, not the panel's
   in-memory pending queue. Reloading/closing the panel loses queued writes; no batch ID exists.
-- XD does not move its viewport to a programmatically created artboard; no exposed bridge tool
-  controls viewport position.
+- `xd_prototype_focus` can pan the canvas with the documented `viewport.scrollIntoView(node)`, but
+  XD still does not auto-scroll to a programmatically created artboard, no operation can set focus
+  into a specific panel or Prototype mode, and `scrollIntoView` is animated — `viewport.bounds` may
+  not have changed by the time it is read back, in which case movement is reported unverified.
 - `xd_apply_design_tokens` stores JSON on root `pluginData`; it does not create native swatches,
   character styles, or component assets.
 

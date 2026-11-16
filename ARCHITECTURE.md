@@ -13,8 +13,8 @@
 │              ▼                                                     │
 │  bridge/bin/bridge.ts            (spawned per directory by OpenCode)│
 │   ├─ src/mcp-server.ts   — MCP protocol, tools/list, tools/call    │
-│   ├─ src/tools.ts        — 47 tool definitions + handlers          │
-│   ├─ src/operations.ts   — 41-operation whitelist + validation     │
+│   ├─ src/tools.ts        — 71 tool definitions + handlers          │
+│   ├─ src/operations.ts   — 53-operation whitelist + validation     │
 │   ├─ src/xd-link.ts      — WebSocket SERVER on 127.0.0.1:27183     │
 │   │                         token auth, serial queue, timeouts     │
 │   └─ src/util.ts         — token, logging, WCAG contrast math      │
@@ -73,9 +73,12 @@ calling model (so a vision-capable model can critique it directly) plus a saved 
 
 ### 7. Honest capability reporting
 `xd_get_capabilities` reports bridge ops and, when connected, plugin capabilities. Component
-masters/variants and prototype wire authoring remain unsupported. Prototype inspection is
-read-only. `xd_audit_screen` checks screen-specific semantic role coverage; it does not claim
-visual quality.
+masters/variants and prototype wire authoring remain unsupported. Prototype work is assisted, not
+authored: `xd_prototype_plan` resolves a manifest to GUIDs, `xd_prototype_focus` /
+`xd_prototype_prepare` move selection and canvas scroll (both documented writable APIs),
+`xd_prototype_verify` classifies one edge, and `xd_validate_prototype` emits the final report.
+Every prototype tool returns `authoringSupported:false`. `xd_audit_screen` checks screen-specific
+semantic role coverage; it does not claim visual quality.
 
 ## Agent/skill layer (OpenCode side)
 

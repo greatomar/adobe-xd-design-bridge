@@ -26,7 +26,7 @@ test("MCP handshake and tool discovery", async (t) => {
     "xd_create_component", "xd_update_node", "xd_move_node", "xd_resize_node",
     "xd_apply_style", "xd_update_text", "xd_apply_design_tokens",
     "xd_create_component_variants", "xd_inspect_design_consistency", "xd_export_artboard",
-    "xd_export_selection", "xd_capture_design_preview", "xd_validate_document", "xd_get_prototype_state", "xd_validate_prototype", "xd_audit_screen",
+    "xd_export_selection", "xd_capture_design_preview", "xd_validate_document", "xd_get_prototype_state", "xd_validate_prototype", "xd_prototype_plan", "xd_prototype_focus", "xd_prototype_prepare", "xd_prototype_verify", "xd_audit_screen",
     "xd_preview_operation", "xd_execute_operation", "xd_execute_batch", "xd_get_operation_status",
   ]) {
     assert.ok(names.includes(expected), `missing tool ${expected}`);

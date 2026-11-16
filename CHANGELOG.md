@@ -1,6 +1,97 @@
 # Changelog
 
-## 1.1.0 — 2026-11-11 (Design Asset Intelligence)
+## 1.1.3 - 2026-11-16 (Selection persistence: pan-first, select-last)
+
+A live diagnostic proved that XD **does** honour a selection assigned inside `editDocument`, but
+only when the assignment is the last scenegraph-affecting step of the transaction. 1.1.2 assigned
+first and then panned, which silently discarded the selection.
+
+### Fixed
+- **Order reversed** in `prototype_focus` and `prototype_prepare_connection`: `focusViewport(node)`
+  now runs before `attemptSelection(node)`, so selection is the final step.
+- **`focused` removed from the operation payload.** The handler cannot observe post-commit state, so
+  it reports `focusState:"selection-assigned"` with `assignedTo` / `selectedInTransaction` /
+  `wasSelectedBefore` and `confirmationRequired:"read xd_get_selection after execution"`. Focus is
+  an agent-level conclusion backed only by an independent post-commit `xd_get_selection`.
+- States are now `selection-assigned` | `selection-failed` | `focus-unverified` | `not-attempted`;
+  the overlapping `focused` / `already-selected` booleans are gone.
+- Instruction text no longer asserts that the source node is already selected.
+- The temporary `selection_probe` diagnostic operation was **removed** from the plugin and the
+  bridge registry; the behaviour it discovered is now covered by normal tests.
+
+### Tests
+- Fake runtime logs an ordered `order[]` of scenegraph-affecting operations and models post-commit
+  persistence, so the pan-before-select rule and the surviving selection are asserted directly.
+- 191/191 passing.
+
+## 1.1.2 - 2026-11-16 (Prototype focus: live-verified corrections)
+
+Live acceptance against XD 61 disproved three assumptions in 1.1.1. Fixed:
+
+### Fixed
+- **Selection requires the edit gate.** `scenegraph.selection.items = [...]` throws
+  *"not permitted to make changes from the background. Use editDocument() for panel
+  UI handlers"* when assigned outside `editDocument`. `prototype_focus` and
+  `prototype_prepare_connection` are therefore now **queued** operations (`mutating:true`,
+  removed from the panel's `nonMutating` set): they run inside the normal
+  `application.editDocument` callback after **Execute pending**. No new execution
+  mechanism was introduced and the whitelist/queue/authentication path is unchanged.
+- **Viewport API corrected.** The non-existent `viewport.scrollToRect` was replaced with
+  the documented `viewport.scrollIntoView(node)`. `viewport.bounds` and `viewport.zoomFactor`
+  are snapshotted before/after, and `scrolled:true` is reported only when `bounds` actually
+  changed. New honest codes: `viewport_moved`, `already-in-view`,
+  `viewport_change_unverified`, `viewport_unsupported`, `viewport_unavailable`, `viewport_error`.
+- **False-positive focus removed.** `focused:true` could previously coexist with a
+  `selectionError` because it was derived from read-back alone. Selection is now classified as
+  `focusState`: `focused` (genuine change), `already-selected` (was selected before the call),
+  `selection-failed` (write threw or did not apply), `focus-unverified` (state unreadable).
+  `focused` is `true` only for `focused`.
+
+### Tests
+- Fake XD runtime now enforces the live rule: selection writes outside `editDocument` throw
+  when `enforceEditContext` is on, so tests cannot pass on behaviour XD forbids.
+- 10 new regression tests (selection rejected in background, selection applied through
+  `editDocument`, `already-selected` vs `focused`, error/focused exclusivity, focus-unverified,
+  `scrollIntoView(node)` usage, evidence-based `scrolled`, `already-in-view`, unsupported viewport,
+  queue routing). Suite: 190/190.
+
+## 1.1.1 - 2026-11-16 (Prototype Wiring Assistant)
+
+### Added
+- **3 new XD operations** (`ops.js`, plugin **1.0.7**, 53 total):
+  `prototype_focus`, `prototype_prepare_connection`, `prototype_verify_connection`.
+  All are read-only: they change selection and canvas scroll, never the document.
+- **4 new MCP tools** (71 total): `xd_prototype_plan`, `xd_prototype_focus`,
+  `xd_prototype_prepare`, `xd_prototype_verify`.
+- **Flow manifest** (`bridge/src/prototype.ts`): `{name?, home?, edges[{source,target,
+  sourceRole?,trigger?,action?,transition?,overlay?,preserveScrollPosition?,note?}]}`,
+  validated structurally then resolved against the live document — semantic names
+  (`Home/PrimaryCTA`) become GUIDs, with `source-not-found`, `source-ambiguous`,
+  `target-not-found` and `home-not-found` diagnostics instead of guesses.
+- **`xd_prototype_focus`** selects a node with the documented writable
+  `scenegraph.selection.items` and scrolls with `viewport.scrollToRect(bounds, false)`,
+  confirming the selection by read-back and reporting `selected:false` honestly.
+- **`xd_validate_prototype` is now a real report**: `verdict` (`pass`/`fail`),
+  `expected[]`, `detected[]`, `missing[]`, `incorrect[]`, `extra[]`,
+  `summary{…,coverage}` — with source/target GUIDs and semantic names.
+  Backwards compatible: `valid`, `results[]` and `actualConnectionCount` are unchanged.
+- **7-way per-edge verdicts**: `ok`, `missing`, `incomplete`, `wrong-destination`,
+  `wrong-trigger`, `wrong-action`, `ambiguous`.
+- `docs/prototype-wiring-workflow.md` and a §7A section in the Design Agent contract.
+
+### Unchanged by design
+- **Prototype wires still cannot be authored through XD's public UXP API.** The
+  `interactions` module is read-only and no documented command creates, edits or
+  deletes a connection. Every prototype tool returns `authoringSupported:false` and
+  `createdWire:false`; manual wiring in XD Prototype mode is required. No undocumented
+  internal state, file-format injection or UI automation was introduced.
+
+### Tests
+- 24 new tests (180 total, all passing): manifest validation, plan resolution, focus,
+  preparation states, every verification verdict, complete/incomplete/extra reports,
+  and non-mutating registration.
+
+## 1.1.0 - 2026-11-11 (Design Asset Intelligence)
 
 ### Added
 - **Asset layer** (`bridge/src/assets/`): source catalog with real integration

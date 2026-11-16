@@ -150,7 +150,7 @@
       ws = new WebSocket(URL);
       console.log("BOOT: WebSocket created, protocol support confirmed");
       ws.onopen = function () {
-        ws.send(JSON.stringify({ type: "hello", token: token, version: "1.0.6", capabilities: ["panel", "editDocument", "createRenditions", "scenegraph", "nativeImport", "prototypeInspection"] }));
+        ws.send(JSON.stringify({ type: "hello", token: token, version: "1.0.10", capabilities: ["panel", "editDocument", "createRenditions", "scenegraph", "nativeImport", "prototypeInspection"] }));
       };
       ws.onmessage = function (evt) {
         let msg;
