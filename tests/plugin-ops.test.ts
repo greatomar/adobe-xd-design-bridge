@@ -91,7 +91,7 @@ function sceneNodeList(items: any[]) {
  * properties the handlers read. Renditions and the file system are recorded,
  * never performed.
  */
-function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNodeList"; filePickerCancel?: boolean; enforceEditContext?: boolean } = {}): Harness {
+function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNodeList"; filePickerCancel?: boolean; enforceEditContext?: boolean; ellipseSizeBug?: "detached" | "always" | "none" } = {}): Harness {
   const childrenKind = opts.childrenKind ?? "array";
   const logs: string[] = [];
   const record = (...args: unknown[]) => {
@@ -176,6 +176,9 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
       }
 
       resize(w: number, h: number) {
+        // Real XD resize() sets the node size as well as its bounds.
+        this.width = w;
+        this.height = h;
         this.globalDrawBounds.width = w;
         this.globalDrawBounds.height = h;
         this.localBounds.width = w;
@@ -226,6 +229,42 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
   const Artboard = xdClass("Artboard");
   const Rectangle = xdClass("Rectangle");
   const Ellipse = xdClass("Ellipse");
+
+  // XD 61 quirk, verified live: width/height assigned to an Ellipse *before* it is
+  // attached to a parent are silently dropped, so the node lands at 0x0 while the
+  // creation op still reports success. The fake models that by default so the
+  // handler's repair-and-verify path is genuinely exercised.
+  const ellipseSizeBug = opts.ellipseSizeBug ?? "detached";
+  if (ellipseSizeBug !== "none") {
+    const backing = new WeakMap<any, { w: number; h: number }>();
+    const slot = (self: any) => {
+      let s = backing.get(self);
+      if (!s) {
+        s = { w: 0, h: 0 };
+        backing.set(self, s);
+      }
+      return s;
+    };
+    Object.defineProperty(Ellipse.prototype, "width", {
+      configurable: true,
+      get() { return slot(this).w; },
+      set(v: number) {
+        if (ellipseSizeBug === "always") return; // never applies
+        if (this.parent) slot(this).w = v;       // detached writes are dropped
+      },
+    });
+    Object.defineProperty(Ellipse.prototype, "height", {
+      configurable: true,
+      get() { return slot(this).h; },
+      set(v: number) {
+        if (ellipseSizeBug === "always") return;
+        if (this.parent) slot(this).h = v;
+      },
+    });
+    if (ellipseSizeBug === "always") {
+      Ellipse.prototype.resize = function () { /* XD refused to apply any size */ };
+    }
+  }
   const Text = xdClass("Text");
   const Group = xdClass("Group");
   const Line = xdClass("Line");
@@ -2170,6 +2209,65 @@ test("create_screen aborts remaining children after the first failure", () => {
 
   const ab = h.sg.getNodeByGUID(r.guid);
   assert.equal(h.kids(ab).length, 1, "only the pre-failure child exists");
+});
+
+test("create_ellipse repairs XD's detached-size quirk and reports real geometry", () => {
+  const h = load(); // ellipseSizeBug defaults to "detached", as observed live
+  const ab = h.artboard("Board");
+  h.root.addChild(ab);
+
+  const r = h.handlers.create_ellipse({ parent: ab.guid, name: "Glow", frame: { x: 10, y: 20, width: 80, height: 60 } });
+  assert.equal(r.ok, true);
+  assert.equal(r.width, 80, "the size is reported back, not assumed");
+  assert.equal(r.height, 60);
+
+  const node = h.sg.getNodeByGUID(r.guid);
+  assert.equal(node.width, 80);
+  assert.equal(node.height, 60);
+  assert.deepEqual(plain(node.globalDrawBounds), { x: 10, y: 20, width: 80, height: 60 });
+  assert.equal(node.parent, ab);
+});
+
+test("create_ellipse never reports success for geometry it could not apply", () => {
+  const h = load({ ellipseSizeBug: "always" });
+  const ab = h.artboard("Board");
+  h.root.addChild(ab);
+  const before = h.kids(ab).length;
+
+  const r = h.handlers.create_ellipse({ parent: ab.guid, name: "Broken", frame: { x: 0, y: 0, width: 40, height: 40 } });
+  assert.equal(r.ok, false, "a 0x0 ellipse is a failure, not a success");
+  assert.equal(r.code, "geometry_mismatch");
+  assert.equal(r.width, 0);
+  assert.equal(r.height, 0);
+  assert.deepEqual(plain(r.expected), { width: 40, height: 40 });
+  assert.equal(r.removed, true, "the unusable node is removed");
+  assert.equal(h.kids(ab).length, before, "no zero-size node is left behind");
+  assert.ok(h.kids(ab).every((n: any) => n.guid !== r.guid));
+});
+
+test("create_screen surfaces a child geometry failure and keeps abort semantics", () => {
+  const h = load({ ellipseSizeBug: "always" });
+  const r = h.handlers.create_screen({
+    artboard: { name: "S", frame: { x: 0, y: 0, width: 300, height: 400 } },
+    children: [
+      { op: "create_rectangle", name: "Ok", frame: { x: 0, y: 0, width: 50, height: 50 } },
+      { op: "create_ellipse", name: "Bad", frame: { x: 0, y: 60, width: 50, height: 50 } },
+      { op: "create_text", name: "After", text: "x", frame: { x: 0, y: 120, width: 100 } },
+    ],
+  });
+
+  assert.equal(r.ok, false);
+  assert.equal(r.aborted, true);
+  assert.equal(r.children[0].ok, true);
+  assert.equal(r.children[0].width, 50);
+  assert.equal(r.children[1].ok, false);
+  assert.equal(r.children[1].code, "geometry_mismatch");
+  assert.match(String(r.children[1].error), /could not be sized/);
+  assert.equal(r.children[2].ok, false);
+  assert.match(String(r.children[2].error), /aborted after previous failure/);
+
+  const ab = h.sg.getNodeByGUID(r.guid);
+  assert.equal(h.kids(ab).length, 1, "only the successfully sized rectangle survives");
 });
 
 test("handler inventory preserves prior operations and exposes documented capabilities (54 ops, 15 read-only)", () => {

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.5 - 2026-11-16 (Shape geometry is verified, not assumed)
+
+Live work on the login screen found `create_ellipse` returning `ok:true` with a GUID for a node it
+had created at 0×0. Root cause: XD 61 drops `width`/`height` assigned to a shape *before* it is
+attached to a parent; the handler set size pre-attach and never checked the result.
+
+### Fixed
+- **`ensureShapeSize` + `shapeGeometryFailure`**: shapes are sized *after* `addChild` (preferring
+  `resize()`), then verified to within 0.5 px. A shape that still does not match returns
+  `{ok:false, code:"geometry_mismatch", width, height, expected, removed}` and is removed from the
+  parent, so a 0×0 node is never left behind and never reported as success.
+- Applied to `create_rectangle`, `create_ellipse` and `create_polygon` (the frame-sized shapes).
+  `create_line` (start/end), `create_path` (path data) and `create_text` (auto height) derive their
+  geometry differently and are unchanged.
+- Successful creation ops now also return `width`/`height`, so callers can assert real geometry
+  instead of trusting `ok:true`.
+- **`create_screen` inherits the fix**: a child that cannot be sized fails the child result, aborts
+  the remaining children, and never appears as a zero-size node.
+
+### Tests
+- The fake runtime now models the host quirk (detached writes dropped; `"always"` mode for
+  unresizable hosts) and `resize()` updates `width`/`height` like real XD.
+- 3 new tests: repair path, honest failure with node removal, and child-geometry failure inside
+  `create_screen`. 196/196 passing.
+
 ## 1.1.4 - 2026-11-16 (`create_screen`: one transaction per screen)
 
 Editing friction had a structural cause: children need the artboard GUID, which only exists after

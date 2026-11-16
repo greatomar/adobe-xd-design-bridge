@@ -894,6 +894,72 @@
     }
   }
 
+  /**
+   * XD 61 drops `width`/`height` assigned to a shape *before* it is attached to a
+   * parent — observed live on Ellipse, where the node was created at 0x0 while the
+   * operation still reported success. Re-apply the size after attach, preferring
+   * resize(), and verify the result. Never report success for geometry we did not get.
+   */
+  function ensureShapeSize(node, frame) {
+    const wantW = frame.width;
+    const wantH = frame.height;
+    const matches = () => typeof node.width === "number"
+      && typeof node.height === "number"
+      && Math.abs(node.width - wantW) <= 0.5
+      && Math.abs(node.height - wantH) <= 0.5;
+    if (matches()) return true;
+    try {
+      if (typeof node.resize === "function") node.resize(wantW, wantH);
+    } catch (e) { /* verified below */ }
+    if (matches()) return true;
+    try {
+      node.width = wantW;
+      node.height = wantH;
+    } catch (e2) { /* verified below */ }
+    return matches();
+  }
+
+  /**
+   * Verify a just-created shape. Returns null on success, or a structured failure
+   * after removing the unusable node (a 0x0 shape must not be left behind).
+   */
+  function shapeGeometryFailure(node, frame, label) {
+    ensureShapeSize(node, frame);
+    if (typeof node.width === "number" && typeof node.height === "number"
+      && Math.abs(node.width - frame.width) <= 0.5
+      && Math.abs(node.height - frame.height) <= 0.5) {
+      return null;
+    }
+    const w = typeof node.width === "number" ? node.width : null;
+    const h = typeof node.height === "number" ? node.height : null;
+    let removed = false;
+    try {
+      if (node && typeof node.removeFromParent === "function") {
+        node.removeFromParent();
+        removed = true;
+      }
+    } catch (e) {
+      removed = false;
+    }
+    return {
+      ok: false,
+      code: "geometry_mismatch",
+      error: label + " could not be sized: got " + w + "x" + h + ", expected " + frame.width + "x" + frame.height,
+      guid: node.guid,
+      width: w,
+      height: h,
+      expected: { width: frame.width, height: frame.height },
+      removed: removed,
+    };
+  }
+
+  /** Size, place, then prove the geometry. Returns null on success. */
+  function finishShape(node, frame, label) {
+    ensureShapeSize(node, frame);
+    setPosition(node, frame);
+    return shapeGeometryFailure(node, frame, label);
+  }
+
   const handlers = {
     get_document_info: () => {
       const info = docInfo();
@@ -1062,26 +1128,24 @@
       const pf = findParent(p);
       if (!pf.parent) return { ok: false, code: pf.code, error: pf.error };
       const rect = new scenegraph.Rectangle();
-      rect.width = p.frame.width;
-      rect.height = p.frame.height;
       if (p.name) rect.name = p.name;
       applyStyle(rect, p.style);
       pf.parent.addChild(rect);
-      setPosition(rect, p.frame);
-      return { ok: true, guid: rect.guid, name: rect.name };
+      const failure = finishShape(rect, p.frame, "rectangle");
+      if (failure) return failure;
+      return { ok: true, guid: rect.guid, name: rect.name, width: rect.width, height: rect.height };
     },
 
     create_ellipse: (p) => {
       const pf = findParent(p);
       if (!pf.parent) return { ok: false, code: pf.code, error: pf.error };
       const el = new scenegraph.Ellipse();
-      el.width = p.frame.width;
-      el.height = p.frame.height;
       if (p.name) el.name = p.name;
       applyStyle(el, p.style);
       pf.parent.addChild(el);
-      setPosition(el, p.frame);
-      return { ok: true, guid: el.guid, name: el.name };
+      const failure = finishShape(el, p.frame, "ellipse");
+      if (failure) return failure;
+      return { ok: true, guid: el.guid, name: el.name, width: el.width, height: el.height };
     },
 
     create_line: (p) => {
@@ -1101,13 +1165,12 @@
       const polygon = new scenegraph.Polygon();
       polygon.cornerCount = p.cornerCount || 3;
       if (p.starRatio !== undefined) polygon.starRatio = p.starRatio;
-      polygon.width = p.frame.width;
-      polygon.height = p.frame.height;
       if (p.name) polygon.name = p.name;
       applyStyle(polygon, p.style);
       pf.parent.addChild(polygon);
-      setPosition(polygon, p.frame);
-      return { ok: true, guid: polygon.guid, name: polygon.name };
+      const failure = finishShape(polygon, p.frame, "polygon");
+      if (failure) return failure;
+      return { ok: true, guid: polygon.guid, name: polygon.name, width: polygon.width, height: polygon.height };
     },
 
     create_path: (p) => {

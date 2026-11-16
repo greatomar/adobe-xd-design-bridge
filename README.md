@@ -2,9 +2,9 @@
 
 **A local-first MCP bridge that lets an AI design agent build real, editable Adobe XD documents — plus a design-asset intelligence layer for icons, type and component patterns.**
 
-[![Tests](https://img.shields.io/badge/tests-193%2F193-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-196%2F196-brightgreen)](#testing)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.11-blueviolet)](#the-xd-plugin)
+[![Plugin](https://img.shields.io/badge/XD%20plugin-1.0.12-blueviolet)](#the-xd-plugin)
 [![MCP tools](https://img.shields.io/badge/MCP%20tools-72-blue)](#mcp-tool-surface)
 [![Runtime](https://img.shields.io/badge/Node.js-%E2%89%A522.6-339933)](#requirements)
 [![Transport](https://img.shields.io/badge/transport-127.0.0.1%20only-lightgrey)](#security-model)
@@ -193,7 +193,7 @@ Highlights: `xd_execute_batch` (whole screen in one undo step),
 
 ## The XD plugin
 
-Version **1.0.11**. Plain JavaScript, no build step, no external libraries.
+Version **1.0.12**. Plain JavaScript, no build step, no external libraries.
 
 - **Execution gate** — `application.editDocument` only runs from a panel UI
   event; the panel drains the queue in one transaction (single undo entry).
@@ -215,7 +215,7 @@ cd bridge
 node --test ..\tests\*.test.ts
 ```
 
-**193/193 passing**, covering:
+**196/196 passing**, covering:
 
 - MCP protocol, tool registry, argument validation
 - Plugin handlers against a fake XD runtime (incl. `SceneNodeList` semantics)
