@@ -179,12 +179,12 @@ test("inspect_node validates its pagination window", () => {
   assert.deepEqual((params as { params: Record<string, unknown> }).params, { guid: "g", limit: 30, offset: 60 });
 });
 
-test("move_node requires both coordinates and states the parent-relative contract", () => {
+test("move_node requires both coordinates and states the artboard-relative contract", () => {
   assert.equal(validateOperation({ op: "move_node", guid: "g" }).ok, false);
   assert.equal(validateOperation({ op: "move_node", guid: "g", x: 10 }).ok, false);
   assert.equal(validateOperation({ op: "move_node", guid: "g", x: 10, y: 20 }).ok, true);
   assert.equal(validateOperation({ op: "move_node", guid: "g", x: 1, y: 2, relative: true }).ok, true);
-  assert.match(OPERATIONS.move_node.description, /PARENT-RELATIVE/);
+  assert.match(OPERATIONS.move_node.description, /ARTBOARD-RELATIVE/);
   assert.match(OPERATIONS.update_node.description, /move_node/);
 });
 

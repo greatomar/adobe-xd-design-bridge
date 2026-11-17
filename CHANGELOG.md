@@ -31,11 +31,24 @@ Every case was traced through schema -> validation -> plugin handler -> read-bac
 - New `docs/mutation-contracts.md` records the measured contracts and the queued/applied/verified
   distinction the agent must respect.
 
+### Live acceptance (stage 9.1 fixture, XD 61.0.12.1)
+- `Stage9.1-Geometry-Test` / `Stage9.1-Reparent-Test` artboards at y=4200/5000, isolated from every
+  existing artboard; 39 fixture children created in one queued batch, 39/39 applied.
+- `move_node`: (20,4220) -> (40,4280), `delta {20,60}`, `placement.inside:true`, `safe:true`;
+  the same node moved to artboard y=2000 reported `inside:false`, `safe:false`.
+- `resize_node`: 80x40 -> 120x70 with `verified:true` (tolerance 0.5).
+- `update_node` frame / unknown keys rejected through live MCP, queue still idle afterwards.
+- `inspect_node`: 38-child artboard returns `childrenTotal:38`; page 2 = 8 children with
+  `hasMore:false`; a page beyond the end returns 0 children.
+- Reparenting into a group that lives inside the old parent exposed two host truths: a recursive
+  old-parent search produces a false failure, and the placement origin is the artboard, not the
+  group bounds (20 px drift). Both are fixed and covered by tests.
+
 ### Tests
-- 11 new tests (316/316 passing): plugin-side pagination boundaries (0/1/30/35 children), move
-  placement and off-artboard reporting, resize verification failure and text reflow, reparent
-  verification failure, and bridge-side rejection of geometry/unknown properties, pagination
-  validation, coordinate requirements and queue-free rejection through a real `XdLink`.
+- 14 new tests (319/319 passing): plugin-side pagination boundaries, move placement and
+  off-artboard reporting, resize verification failure and text reflow, reparent nested-parent and
+  geometry-drift cases, artboard-space placement, and bridge-side rejection of geometry/unknown
+  properties, pagination validation and queue-free rejection through a real `XdLink`.
 
 ## 1.1.5 - 2026-11-16 (Shape geometry is verified, not assumed)
 

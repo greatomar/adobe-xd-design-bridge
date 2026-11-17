@@ -1,6 +1,6 @@
 # Testing
 
-## Automated test suite (passing: 316/316, 2026-11-18)
+## Automated test suite (passing: 319/319, 2026-11-18)
 
 Run from `bridge/`:
 
@@ -49,7 +49,7 @@ bridge envelope, a fake document, read-back and evidence levels.
 gates*, not live rendering, fonts, or the plugin's `editDocument` timing. Only the live checklist
 below can establish LEVEL 5 against real Adobe XD.
 
-### tests/plugin-ops.test.ts (93 tests) — real plugin handlers, fake XD runtime
+### tests/plugin-ops.test.ts (96 tests) — real plugin handlers, fake XD runtime
 
 Loads the actual `xd-plugin/ops.js` in a `vm` sandbox with a functional fake scenegraph
 (`application`, `scenegraph`, `commands`, `uxp` all mocked). No real XD API is contacted; write
@@ -61,7 +61,7 @@ paths mutate the fake tree only.
 | Parent resolution | explicit parent guid, unknown parent (`node_not_found`), first-artboard default, root fallback |
 | Creation | artboards, rectangle, ellipse, line, polygon, path, ImageFill, picker import (mock picker), text; group and mask-group commands |
 | Mutation | update, move/resize, rotate, delete, duplicate, leaf reparent, ungroup, arrange/align/distribute, gradients/stroke effects, styles, text, tokens |
-| Mutation verification | `move_node` reports parent-relative before/after/delta and flags an off-artboard result; `resize_node` reads the size back and fails with `MUTATION_VERIFICATION_FAILED` when the host ignored it (text reflow reported separately); `reparent_node` verifies the actual parent, membership and geometry; `inspect_node` pagination boundaries (0/1/30/35 children) with an authoritative `childrenTotal` |
+| Mutation verification | `move_node` reports artboard-relative before/after/delta and flags an off-artboard result; `resize_node` reads the size back and fails with `MUTATION_VERIFICATION_FAILED` when the host ignored it (text reflow reported separately); `reparent_node` verifies direct membership, is not fooled by a new parent nested inside the old one, and reports geometry drift; `inspect_node` pagination boundaries (0/1/30/35 children) with an authoritative `childrenTotal`; placement uses the artboard origin, not a group's bounds |
 | Query/audit | search, validate document, consistency, semantic screen-role audit, prototype flow/edge inspection and required-edge validation |
 | Prototype focus | selection rejected in a background context, applied through `editDocument`, `already-selected` vs `focused`, `selection-failed`/`focus-unverified`, error/focused exclusivity, `scrollIntoView(node)`, evidence-based `scrolled`, `already-in-view`, unsupported/unavailable viewport, queue routing |
 | Export | `export_artboard` (rendition node/scale, base64, cleanup), `export_selection`, empty selection |
@@ -134,3 +134,4 @@ compatibility or visual output.
 `examples/sample-mobile-design.json` contains the "Solstice Wallet" sample: token set plus
 ordered batch operations for a 390×844 screen, with usage steps (create artboard → substitute
 guid → run remaining batch → export → critique loop).
+

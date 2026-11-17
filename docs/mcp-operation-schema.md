@@ -86,7 +86,7 @@ failure.
 | `xd_align_nodes` | `guids[]` (≥2), `action` | — | same parent |
 | `xd_distribute_nodes` | `guids[]` (≥3), `action` | — | same parent |
 | `xd_update_node` | `guid` | `name`, `style`, `visible`, `locked`, `blendMode`, `markedForExport`, `fixedWhenScrolling` | artboard background via `style.fill`; `blendMode` accepts documented `BLEND_MODE_*` names |
-| `xd_move_node` | `guid`, `x`, `y` | `relative` | parent-relative |
+| `xd_move_node` | `guid`, `x`, `y` | `relative` | artboard-relative |
 | `xd_resize_node` | `guid` | `width`, `height`, `relative` | at least one dimension |
 | `xd_apply_style` | `style` | `guid` or `guids[]` | the reliable way to colour Text |
 | `xd_update_text` | `guid` | `text`, `style` | text node only |

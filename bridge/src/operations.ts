@@ -920,7 +920,7 @@ export const OPERATIONS: Record<string, OpSpec> = {
   },
   update_node: {
     op: "update_node",
-    description: "Set writable properties (name, style, visible, locked, blendMode, markedForExport, fixedWhenScrolling) on a node by guid. Geometry is not accepted here: use move_node/resize_node, whose coordinates are parent-relative.",
+    description: "Set writable properties (name, style, visible, locked, blendMode, markedForExport, fixedWhenScrolling) on a node by guid. Geometry is not accepted here: use move_node/resize_node, whose coordinates are artboard-relative.",
     mutating: true,
     validate: (p) => {
       const g = optGuid(p, "guid");
@@ -956,7 +956,7 @@ export const OPERATIONS: Record<string, OpSpec> = {
         if (p[key] !== undefined) {
           return {
             ok: false,
-            error: `UNSUPPORTED_PROPERTY: ${key}. update_node accepts ${UPDATABLE_PROPERTIES.join(", ")} only; use move_node (x,y) or resize_node (width,height) for geometry - both are parent-relative.`,
+            error: `UNSUPPORTED_PROPERTY: ${key}. update_node accepts ${UPDATABLE_PROPERTIES.join(", ")} only; use move_node (x,y) or resize_node (width,height) for geometry - coordinates are artboard-relative.`,
           };
         }
       }
@@ -981,7 +981,7 @@ export const OPERATIONS: Record<string, OpSpec> = {
   move_node: {
     op: "move_node",
     description:
-      "Reposition a node by guid. Coordinates are PARENT-RELATIVE: the default is an absolute position inside the node's current parent, `relative:true` is an additive offset. The result reports before/after bounds, the delta and whether the node is still inside its artboard.",
+      "Reposition a node by guid. Coordinates are ARTBOARD-RELATIVE (identical to parent-relative for a direct artboard child; a group's own bounds are NOT the origin on XD 61). `relative:true` is an additive offset. The result reports before/after bounds, the delta, the origin and whether the node is still inside its artboard.",
     mutating: true,
     validate: (p) => {
       const g = optGuid(p, "guid");
@@ -999,7 +999,7 @@ export const OPERATIONS: Record<string, OpSpec> = {
   resize_node: {
     op: "resize_node",
     description:
-      "Resize a node by guid. Width/height are parent-relative dimensions; `relative:true` treats them as scale factors. The result reads the resulting size back and fails with MUTATION_VERIFICATION_FAILED when the host did not apply it.",
+      "Resize a node by guid. Width/height are dimensions; `relative:true` treats them as scale factors. The result reads the resulting size back and fails with MUTATION_VERIFICATION_FAILED when the host did not apply it.",
     mutating: true,
     validate: (p) => {
       const g = optGuid(p, "guid");

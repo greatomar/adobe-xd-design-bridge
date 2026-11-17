@@ -191,8 +191,22 @@ function load(opts: { documentName?: string; childrenKind?: "array" | "sceneNode
       }
 
       placeInParentCoordinates(registrationPoint: { x: number; y: number }, targetPoint: { x: number; y: number }) {
-        this.globalDrawBounds.x = targetPoint.x - registrationPoint.x;
-        this.globalDrawBounds.y = targetPoint.y - registrationPoint.y;
+        // Measured on XD 61: the target point is in the enclosing ARTBOARD's
+        // space (for a group child, the group's bounds are not the origin).
+        const origin = this.placementOrigin();
+        this.globalDrawBounds.x = origin.x + targetPoint.x - registrationPoint.x;
+        this.globalDrawBounds.y = origin.y + targetPoint.y - registrationPoint.y;
+      }
+
+      placementOrigin() {
+        let cur = this.parent;
+        while (cur) {
+          if (cur.constructor && cur.constructor.name === "Artboard") {
+            return { x: cur.globalDrawBounds.x, y: cur.globalDrawBounds.y };
+          }
+          cur = cur.parent;
+        }
+        return { x: 0, y: 0 };
       }
 
       rotateAround(delta: number, _center: { x: number; y: number }) {
@@ -2541,7 +2555,8 @@ test("move_node reports the parent-relative contract and flags an off-artboard r
 
   const inside = h.handlers.move_node({ guid: rect.guid, x: 20, y: 200 });
   assert.equal(inside.ok, true);
-  assert.equal(inside.coordinateSystem, "parent-relative");
+  assert.equal(inside.coordinateSystem, "artboard-relative");
+  assert.deepEqual(plain(inside.origin), { x: 0, y: 0 });
   assert.deepEqual(plain(inside.before), { x: 24, y: 120, width: 342, height: 180 });
   assert.deepEqual(plain(inside.after), { x: 20, y: 200, width: 342, height: 180 });
   assert.deepEqual(plain(inside.delta), { dx: -4, dy: 80, dw: 0, dh: 0 });
@@ -2622,4 +2637,67 @@ test("reparent_node verifies the resulting parent relationship", () => {
   assert.equal(failed.ok, false);
   assert.equal(failed.code, "MUTATION_VERIFICATION_FAILED");
   assert.equal(failed.expectedParentGuid, stuck.guid);
+});
+
+test("reparent_node is not fooled by a new parent nested inside the old one", () => {
+  const h = load();
+  const { home } = seeded(h);
+  const group = h.group("Nested");
+  group.globalDrawBounds = { x: 24, y: 120, width: 342, height: 180 };
+  home.addChild(group);
+  const child = h.rectangle("Artboard/Child");
+  child.globalDrawBounds = { x: 24, y: 120, width: 100, height: 40 };
+  home.addChild(child);
+
+  // The new parent lives inside the old parent, so a recursive search of the old
+  // parent still finds the node. That used to produce a false failure even though
+  // the relationship had changed.
+  const r = h.handlers.reparent_node({ guid: child.guid, parent: group.guid });
+  assert.equal(r.ok, true);
+  assert.equal(r.inNewParent, true);
+  assert.equal(r.stillInOldParent, false);
+  assert.equal(r.parentGuid, group.guid);
+  assert.equal(r.oldParentGuid, home.guid);
+  assert.equal(r.geometryPreserved, true);
+  assert.equal(child.parent, group);
+});
+
+test("reparent_node reports geometry drift instead of hiding it", () => {
+  const h = load();
+  const { home, rect } = seeded(h);
+  const group = h.group("Offset");
+  group.globalDrawBounds = { x: 200, y: 300, width: 100, height: 100 };
+  home.addChild(group);
+
+  // A host that accepts the relationship but shifts the node on addChild and
+  // ignores the repositioning request.
+  const origAdd = group.addChild.bind(group);
+  group.addChild = (n: any) => {
+    origAdd(n);
+    n.globalDrawBounds = { ...n.globalDrawBounds, x: n.globalDrawBounds.x + 37 };
+  };
+  rect.placeInParentCoordinates = () => {};
+
+  const r = h.handlers.reparent_node({ guid: rect.guid, parent: group.guid });
+  assert.equal(r.ok, true);
+  assert.equal(r.verified, true, "the relationship itself did change");
+  assert.equal(r.geometryPreserved, false, "the drift is reported, never hidden");
+  assert.ok(r.positionPasses <= 2, "positioning converges in at most two passes");
+});
+
+test("move_node coordinates are the enclosing artboard's space, not a group's", () => {
+  const h = load();
+  const ab = h.artboard("Offset", { x: 1000, y: 2000, width: 390, height: 844 });
+  h.root.addChild(ab);
+  const group = h.group("Card");
+  group.globalDrawBounds = { x: 1020, y: 2020, width: 300, height: 200 };
+  ab.addChild(group);
+  const rect = h.rectangle("Card/Bg");
+  rect.globalDrawBounds = { x: 1020, y: 2020, width: 300, height: 200 };
+  group.addChild(rect);
+
+  const r = h.handlers.move_node({ guid: rect.guid, x: 40, y: 60 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(plain(r.origin), { x: 1000, y: 2000 });
+  assert.deepEqual(plain({ x: r.after.x, y: r.after.y }), { x: 1040, y: 2060 });
 });

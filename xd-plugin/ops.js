@@ -289,6 +289,17 @@
     return out;
   }
 
+  /** Direct membership test. Never recursive: a recursive search of an old parent
+   *  also finds the node when the new parent lives inside that old parent. */
+  function hasDirectChild(parent, node) {
+    if (!parent || !node) return false;
+    const kids = childList(parent);
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i] && kids[i].guid === node.guid) return true;
+    }
+    return false;
+  }
+
   function isArtboard(node) {
     if (!node) return false;
     if (node.constructor && node.constructor.name === "Artboard") return true;
@@ -297,6 +308,27 @@
     } catch (e) {
       return false;
     }
+  }
+
+  /** Coordinate origin used by `placeInParentCoordinates`.
+   *  MEASURED on XD 61: for a node inside a Group the host interprets the target
+   *  point in the enclosing ARTBOARD's space, not in the group's bounding-box
+   *  space. For a direct artboard child the two systems coincide, which is why
+   *  the old "parent-relative" wording looked correct. For a root-level node the
+   *  origin is the document origin. */
+  function coordinateOrigin(node) {
+    if (!node) return { x: 0, y: 0 };
+    if (isArtboard(node)) return { x: 0, y: 0 };
+    let cur = node.parent;
+    let guard = 0;
+    while (cur && guard++ < 100) {
+      if (isArtboard(cur)) {
+        const b = cur.globalDrawBounds;
+        return { x: b ? b.x : 0, y: b ? b.y : 0 };
+      }
+      cur = cur.parent;
+    }
+    return { x: 0, y: 0 };
   }
 
   /** Nearest Artboard ancestor of a node, or null when the node is loose on the canvas. */
@@ -1459,22 +1491,38 @@
       if (node.parent === parent) return { ok: true, guid: node.guid, oldParentGuid: parent.guid, parentGuid: parent.guid, unchanged: true, verified: true };
       const previousParent = node.parent || null;
       const oldParentGuid = previousParent ? previousParent.guid : null;
-      const global = node.globalDrawBounds || { x: 0, y: 0 };
-      const parentBounds = parent === sc.root ? { x: 0, y: 0 } : parent.globalDrawBounds || { x: 0, y: 0 };
+      const global = boundsOf(node) || { x: 0, y: 0, width: 0, height: 0 };
       node.removeFromParent();
       parent.addChild(node);
-      setPosition(node, { x: global.x - parentBounds.x, y: global.y - parentBounds.y });
+      // Reparenting must preserve the absolute position. Measure the coordinate
+      // origin *after* addChild (adding a child can change a group's bounds) and
+      // converge in at most two passes instead of trusting one calculation.
+      // Origin is the containing artboard, not the parent group's bounds.
+      let passes = 0;
+      let current = boundsOf(node);
+      while (passes < 2 && current) {
+        const origin = coordinateOrigin(node);
+        const dx = global.x - current.x;
+        const dy = global.y - current.y;
+        if (Math.abs(dx) <= 0.5 && Math.abs(dy) <= 0.5) break;
+        setPosition(node, {
+          x: (current.x - origin.x) + dx,
+          y: (current.y - origin.y) + dy,
+        });
+        passes += 1;
+        current = boundsOf(node);
+      }
       // Read the relationship back instead of trusting the host call: XD can
       // accept addChild and still leave the node under its previous parent.
       const actualParent = node.parent || null;
       const actualParentGuid = actualParent ? actualParent.guid : null;
-      const inNewParent = !!findNode(parent, node.guid);
-      const stillInOldParent = previousParent && previousParent !== parent ? !!findNode(previousParent, node.guid) : false;
+      // Direct membership only: a recursive search of the OLD parent would find
+      // the node again whenever the new parent lives inside it (artboard ->
+      // group), which produced a false MUTATION_VERIFICATION_FAILED on XD 61.
+      const inNewParent = hasDirectChild(parent, node);
+      const stillInOldParent = previousParent && previousParent !== parent ? hasDirectChild(previousParent, node) : false;
       const after = boundsOf(node);
-      const geometryDelta = boundsDelta(
-        { x: global.x, y: global.y, width: global.width, height: global.height },
-        after,
-      );
+      const geometryDelta = boundsDelta(global, after);
       const geometryPreserved = !geometryDelta
         ? null
         : Math.abs(geometryDelta.dx) <= 1 && Math.abs(geometryDelta.dy) <= 1 &&
@@ -1490,6 +1538,8 @@
           inNewParent,
           stillInOldParent,
           oldParentGuid,
+          geometryPreserved,
+          positionPasses: passes,
         };
       }
       return {
@@ -1501,6 +1551,7 @@
         inNewParent,
         stillInOldParent,
         geometryPreserved,
+        positionPasses: passes,
         before: { x: global.x, y: global.y, width: global.width, height: global.height },
         after,
       };
@@ -1659,10 +1710,12 @@
       if (!nr.ok) return nr;
       const n = nr.node;
       const before = boundsOf(n);
-      // Contract (measured on XD 61): both branches are PARENT-RELATIVE.
-      // `relative` is an additive offset on the current position; the default
-      // is an absolute position inside the node's current parent. Document
-      // coordinates are never accepted implicitly.
+      // Contract (measured on XD 61): the host interprets both branches in the
+      // enclosing ARTBOARD's coordinate space. `relative` is an additive offset
+      // on the current position; the default is an absolute position inside the
+      // containing artboard. For a direct artboard child this is identical to
+      // "parent-relative"; for a group child the group's bounds are NOT the
+      // origin. Document coordinates are never accepted implicitly.
       if (p.relative) {
         n.moveInParentCoordinates(p.x, p.y);
       } else {
@@ -1675,8 +1728,9 @@
       return {
         ok: true,
         guid: n.guid,
-        coordinateSystem: "parent-relative",
+        coordinateSystem: "artboard-relative",
         requested: { x: p.x, y: p.y, relative: !!p.relative },
+        origin: coordinateOrigin(n),
         before,
         after,
         delta,
@@ -1724,7 +1778,6 @@
           code: "MUTATION_VERIFICATION_FAILED",
           error: "resize_node was accepted by the host but the requested size was not applied",
           guid: n.guid,
-          coordinateSystem: "parent-relative",
           expected: requested,
           actual: after,
           before,
@@ -1735,7 +1788,6 @@
       return {
         ok: true,
         guid: n.guid,
-        coordinateSystem: "parent-relative",
         requested,
         before,
         after,

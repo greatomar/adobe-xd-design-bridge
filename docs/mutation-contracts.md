@@ -33,18 +33,23 @@ name, style, visible, locked, blendMode, markedForExport, fixedWhenScrolling
   level too deep, so the plugin only received `guid`). That is what made a batch of
   `update_node {visible:false}` report success while the nodes stayed visible.
 
-## `move_node` — parent-relative coordinates
+## `move_node` — artboard-relative coordinates
 
 ```json
 { "op": "move_node", "guid": "...", "x": 20, "y": 300 }
 ```
 
-* `x`/`y` are **parent-relative**, both required. `relative: true` makes them an additive offset.
-* Document coordinates are never accepted implicitly. Passing absolute coordinates to an artboard
-  child pushes it out of the artboard and reparents it to the pasteboard — this happened in stage 9
-  and cost five text nodes a recovery cycle.
-* The result reports `coordinateSystem: "parent-relative"`, `before`, `after`, `delta`, `moved`,
-  `parentGuid`/`parentName`, and `placement` (`artboardGuid`, `inside`).
+* `x`/`y` are **artboard-relative**, both required. `relative: true` makes them an additive offset.
+* For a direct artboard child this is identical to "parent-relative". For a child of a **Group** it
+  is *not*: XD 61 interprets `placeInParentCoordinates` in the enclosing artboard's space, so the
+  group's own bounds are not the origin. Measured on the stage 9.1 fixture: a group child in an
+  artboard at (0, 5000) moved to `(160, 20)` landed at absolute `(160, 5020)` — artboard-relative,
+  not group-relative.
+* Document coordinates are never accepted implicitly. Passing absolute document coordinates pushes
+  an artboard child out of its artboard — this happened in stage 9 and cost five text nodes a
+  recovery cycle.
+* The result reports `coordinateSystem: "artboard-relative"`, `origin`, `before`, `after`, `delta`,
+  `moved`, `parentGuid`/`parentName`, and `placement` (`artboardGuid`, `inside`).
 * `safe: false` means the node now sits outside its own artboard. The mutation did happen, but it is
   never described as a safe one.
 
@@ -62,12 +67,17 @@ name, style, visible, locked, blendMode, markedForExport, fixedWhenScrolling
 1. Validate the node, the parent, the edit context, and reject containers, self/descendant targets
    and rotated/3D-transformed nodes.
 2. Remember `oldParentGuid` and the node's absolute bounds.
-3. `removeFromParent()`, `addChild()`, then restore the absolute position.
-4. Read back `node.parent`, `findNode(parent, guid)` and the old parent's children.
-5. Return `verified: true` only when the new parent is the actual parent, the node is inside it, and
-   it is gone from the old one. Otherwise `MUTATION_VERIFICATION_FAILED` with
-   `expectedParentGuid`/`actualParentGuid`.
-6. `geometryPreserved` reports whether the absolute frame survived the move (1 px tolerance).
+3. `removeFromParent()`, `addChild()`, then restore the absolute position in the **artboard's**
+   coordinate space, converging in at most two passes (adding a child can move a group's bounds).
+4. Read back `node.parent`, **direct** membership of the new parent and direct membership of the old
+   one. A recursive search of the old parent is wrong: when the new parent is nested inside it
+   (artboard → group) the node is still findable and a correct reparent looks broken. That exact
+   false negative was measured live in stage 9.1.
+5. Return `verified: true` only when the new parent is the actual parent, the node is a direct child
+   of it, and it is no longer a direct child of the old one. Otherwise
+   `MUTATION_VERIFICATION_FAILED` with `expectedParentGuid`/`actualParentGuid`.
+6. `geometryPreserved` reports whether the absolute frame survived (1 px tolerance) and
+   `positionPasses` reports how many correction passes were used. Drift is reported, never hidden.
 
 ## `inspect_node` — paginated, never silently truncated
 

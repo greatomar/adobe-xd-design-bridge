@@ -670,8 +670,8 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
         type: "object",
         properties: {
           guid: { type: "string" },
-          x: { type: "number", description: "Parent-relative x (or additive dx when relative:true)." },
-          y: { type: "number", description: "Parent-relative y (or additive dy when relative:true)." },
+          x: { type: "number", description: "Artboard-relative x (or additive dx when relative:true)." },
+          y: { type: "number", description: "Artboard-relative y (or additive dy when relative:true)." },
           relative: { type: "boolean", description: "Treat x/y as an offset from the current position. Default false." },
         },
         required: ["guid", "x", "y"],
