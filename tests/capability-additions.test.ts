@@ -44,7 +44,7 @@ test("new operations are exposed as MCP tools with schemas", () => {
     assert.ok(tools[tool], "missing tool " + tool);
     assert.equal(tools[tool].inputSchema.type, "object");
   }
-  assert.equal(Object.keys(tools).length, 72, "60 xd_* tools + 11 design_asset_* / design_context_* tools");
+  assert.equal(Object.keys(tools).length, 80, "69 xd_* tools (automation, graph, preflight, grammar, pending) + 11 design_asset_* / design_context_* tools");
 });
 
 test("prototype focus/prepare require the edit gate; verification stays read-only", () => {
@@ -115,4 +115,83 @@ test("selection-command ops require at least one guid", () => {
     assert.equal(validateOperation({ op, guids: [] }).ok, false, op + " must reject an empty guid list");
     assert.equal(validateOperation({ op, guids: ["a"] }).ok, true, op + " must accept one guid");
   }
+});
+
+
+
+
+// --- stage 9.1 strict mutation contracts --------------------------------------
+
+test("update_node rejects geometry instead of silently ignoring it", () => {
+  const frame = validateOperation({ op: "update_node", guid: "g", frame: { x: 1, y: 2, width: 3, height: 4 } });
+  assert.equal(frame.ok, false);
+  assert.match((frame as { error: string }).error, /UNSUPPORTED_PROPERTY: frame/);
+  assert.match((frame as { error: string }).error, /move_node/);
+
+  for (const key of ["x", "y", "width", "height"]) {
+    const r = validateOperation({ op: "update_node", guid: "g", [key]: 10 });
+    assert.equal(r.ok, false, "update_node must reject " + key);
+    assert.match((r as { error: string }).error, new RegExp("UNSUPPORTED_PROPERTY: " + key));
+  }
+
+  // Mixed supported/unsupported payloads are rejected whole: nothing is queued.
+  const mixed = validateOperation({ op: "update_node", guid: "g", name: "Renamed", frame: { x: 0, y: 0, width: 1, height: 1 } });
+  assert.equal(mixed.ok, false);
+});
+
+test("update_node rejects unknown properties and still accepts its documented set", () => {
+  const unknown = validateOperation({ op: "update_node", guid: "g", color: "#fff" });
+  assert.equal(unknown.ok, false);
+  assert.match((unknown as { error: string }).error, /UNKNOWN_PROPERTY: color/);
+
+  const ok = validateOperation({ op: "update_node", guid: "g", name: "n", visible: false, locked: true, markedForExport: true });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(Object.keys((ok as { params: Record<string, unknown> }).params).sort(), ["guid", "locked", "markedForExport", "name", "visible"]);
+});
+
+test("a rejected update_node never reaches the plugin queue", async () => {
+  // XdLink validates before it queues, so this uses the real link with no
+  // plugin attached: the refusal must come from validation, not connectivity.
+  const { XdLink } = await import("../bridge/src/xd-link.ts");
+  const link = new (XdLink as any)({ port: 0, token: "test-token" });
+  const tools = buildTools(link);
+  const result = await (tools.xd_update_node.handler as any)({ guid: "g", frame: { x: 0, y: 0, width: 10, height: 10 } });
+  assert.equal((link as any).queue.length, 0, "no operation may be queued");
+  const text = JSON.stringify(result);
+  assert.match(text, /UNSUPPORTED_PROPERTY/);
+  assert.match(text, /invalid_params/);
+});
+
+test("inspect_node validates its pagination window", () => {
+  assert.equal(validateOperation({ op: "inspect_node", guid: "g" }).ok, true);
+  assert.equal(validateOperation({ op: "inspect_node", guid: "g", limit: 1, offset: 0 }).ok, true);
+  assert.equal(validateOperation({ op: "inspect_node", guid: "g", limit: 500, offset: 25 }).ok, true);
+
+  const zero = validateOperation({ op: "inspect_node", guid: "g", limit: 0 });
+  assert.equal(zero.ok, false);
+  assert.match((zero as { error: string }).error, /limit/);
+
+  assert.equal(validateOperation({ op: "inspect_node", guid: "g", limit: 501 }).ok, false);
+  assert.equal(validateOperation({ op: "inspect_node", guid: "g", limit: 1.5 }).ok, false);
+  assert.equal(validateOperation({ op: "inspect_node", guid: "g", offset: -1 }).ok, false);
+
+  const params = validateOperation({ op: "inspect_node", guid: "g", limit: 30, offset: 60 });
+  assert.deepEqual((params as { params: Record<string, unknown> }).params, { guid: "g", limit: 30, offset: 60 });
+});
+
+test("move_node requires both coordinates and states the parent-relative contract", () => {
+  assert.equal(validateOperation({ op: "move_node", guid: "g" }).ok, false);
+  assert.equal(validateOperation({ op: "move_node", guid: "g", x: 10 }).ok, false);
+  assert.equal(validateOperation({ op: "move_node", guid: "g", x: 10, y: 20 }).ok, true);
+  assert.equal(validateOperation({ op: "move_node", guid: "g", x: 1, y: 2, relative: true }).ok, true);
+  assert.match(OPERATIONS.move_node.description, /PARENT-RELATIVE/);
+  assert.match(OPERATIONS.update_node.description, /move_node/);
+});
+
+test("resize_node refuses non-positive dimensions and keeps relative scale factors usable", () => {
+  assert.equal(validateOperation({ op: "resize_node", guid: "g", width: 0, height: 10 }).ok, false);
+  assert.equal(validateOperation({ op: "resize_node", guid: "g", width: -5, height: 10 }).ok, false);
+  assert.equal(validateOperation({ op: "resize_node", guid: "g", relative: true, width: 0, height: 0.5 }).ok, false);
+  assert.equal(validateOperation({ op: "resize_node", guid: "g", relative: true, width: 0.5, height: 0.5 }).ok, true);
+  assert.equal(validateOperation({ op: "resize_node", guid: "g", relative: true, width: 1, height: 1 }).ok, true);
 });

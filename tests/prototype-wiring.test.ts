@@ -255,5 +255,7 @@ test("prototype tools are discoverable and advertise no authoring capability", a
   assert.match(prepare.description, /Never creates the wire/i);
 
   const caps = payload(await c.callTool("xd_get_capabilities"));
-  assert.match(caps.note, /manual wiring in XD Prototype mode is required/i);
+  assert.match(caps.note, /read-only/i);
+  assert.match(caps.note, /manual per-edge guidance/i);
+  assert.equal(caps.prototypeAuthoring.pluginApi.startsWith("unsupported"), true);
 });

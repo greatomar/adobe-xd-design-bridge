@@ -2465,3 +2465,161 @@ test("update_node writes blendMode, markedForExport and fixedWhenScrolling", () 
   assert.equal(rect.markedForExport, true);
   assert.equal(rect.fixedWhenScrolling, true);
 });
+
+// --- stage 9.1 mutation contracts ---------------------------------------------
+
+test("inspect_node reports an authoritative child total with pagination", () => {
+  const h = load();
+  const { card } = seeded(h);
+  const group = h.group("List");
+  card.addChild(group);
+  for (let i = 0; i < 35; i++) {
+    const row = h.rectangle("Row/" + i);
+    group.addChild(row);
+  }
+
+  const page1 = h.handlers.inspect_node({ guid: group.guid, limit: 30, offset: 0 });
+  assert.equal(page1.ok, true);
+  assert.equal(page1.node.childrenTotal, 35, "childrenTotal is authoritative");
+  assert.equal(page1.node.childCount, 35, "childCount is preserved");
+  assert.equal(page1.node.childrenReturned, 30);
+  assert.equal(page1.node.childrenOffset, 0);
+  assert.equal(page1.node.childrenLimit, 30);
+  assert.equal(page1.node.hasMore, true);
+  assert.equal(page1.node.nextOffset, 30);
+  assert.equal(page1.node.children.length, 30);
+
+  const page2 = h.handlers.inspect_node({ guid: group.guid, limit: 30, offset: 30 });
+  assert.equal(page2.node.childrenReturned, 5);
+  assert.equal(page2.node.hasMore, false);
+  assert.equal(page2.node.nextOffset, null);
+
+  const merged = [...page1.node.children, ...page2.node.children].map((c: any) => c.guid);
+  assert.equal(new Set(merged).size, 35, "pages cover every child exactly once");
+
+  const all = h.handlers.inspect_node({ guid: group.guid });
+  assert.equal(all.node.childrenTotal, 35);
+  assert.equal(all.node.childrenReturned, 35, "default page covers a reasonably sized node");
+  assert.equal(all.node.hasMore, false);
+});
+
+test("inspect_node handles 0, 1 and exactly 30 children without implying truncation", () => {
+  const h = load();
+  const { card } = seeded(h);
+
+  const empty = h.handlers.inspect_node({ guid: card.guid });
+  assert.equal(empty.node.childrenTotal, 2); // seeded rect + title
+  assert.equal(empty.node.hasMore, false);
+
+  const zero = h.group("Empty");
+  card.addChild(zero);
+  const z = h.handlers.inspect_node({ guid: zero.guid });
+  assert.equal(z.node.childrenTotal, 0);
+  assert.equal(z.node.childrenReturned, 0);
+  assert.equal(z.node.hasMore, false);
+  assert.equal(z.node.nextOffset, null);
+
+  const one = h.group("One");
+  card.addChild(one);
+  one.addChild(h.rectangle("Only"));
+  const o = h.handlers.inspect_node({ guid: one.guid });
+  assert.equal(o.node.childrenTotal, 1);
+  assert.equal(o.node.childrenReturned, 1);
+
+  const thirty = h.group("Thirty");
+  card.addChild(thirty);
+  for (let i = 0; i < 30; i++) thirty.addChild(h.rectangle("T/" + i));
+  const t = h.handlers.inspect_node({ guid: thirty.guid });
+  assert.equal(t.node.childrenTotal, 30);
+  assert.equal(t.node.childrenReturned, 30);
+  assert.equal(t.node.hasMore, false);
+});
+
+test("move_node reports the parent-relative contract and flags an off-artboard result", () => {
+  const h = load();
+  const { rect } = seeded(h);
+
+  const inside = h.handlers.move_node({ guid: rect.guid, x: 20, y: 200 });
+  assert.equal(inside.ok, true);
+  assert.equal(inside.coordinateSystem, "parent-relative");
+  assert.deepEqual(plain(inside.before), { x: 24, y: 120, width: 342, height: 180 });
+  assert.deepEqual(plain(inside.after), { x: 20, y: 200, width: 342, height: 180 });
+  assert.deepEqual(plain(inside.delta), { dx: -4, dy: 80, dw: 0, dh: 0 });
+  assert.equal(inside.moved, true);
+  assert.equal(inside.placement.inside, true);
+  assert.equal(inside.safe, true);
+
+  const outside = h.handlers.move_node({ guid: rect.guid, x: 500, y: 200 });
+  assert.equal(outside.ok, true, "the mutation did happen");
+  assert.equal(outside.placement.inside, false);
+  assert.equal(outside.safe, false, "an off-artboard move is never reported as safe");
+
+  const offset = h.handlers.move_node({ guid: rect.guid, relative: true, x: -10, y: 5 });
+  assert.deepEqual(plain({ x: offset.after.x, y: offset.after.y }), { x: 490, y: 205 });
+});
+
+test("resize_node verifies the applied size and fails when the host ignores it", () => {
+  const h = load();
+  const { rect, title } = seeded(h);
+
+  const r = h.handlers.resize_node({ guid: rect.guid, width: 120, height: 60 });
+  assert.equal(r.ok, true);
+  assert.equal(r.verified, true);
+  assert.equal(r.tolerance, 0.5);
+  assert.deepEqual(plain(r.requested), { width: 120, height: 60, relative: false });
+  assert.deepEqual(plain({ w: r.after.width, h: r.after.height }), { w: 120, h: 60 });
+
+  const scale = h.handlers.resize_node({ guid: rect.guid, relative: true, width: 2, height: 0.5 });
+  assert.equal(scale.ok, true);
+  assert.deepEqual(plain({ w: scale.after.width, h: scale.after.height }), { w: 240, h: 30 });
+
+  // A host that accepts the call but does not apply it must not read as success.
+  rect.resize = () => {};
+  const ignored = h.handlers.resize_node({ guid: rect.guid, width: 10, height: 10 });
+  assert.equal(ignored.ok, false);
+  assert.equal(ignored.code, "MUTATION_VERIFICATION_FAILED");
+  assert.deepEqual(plain(ignored.expected), { width: 10, height: 10, relative: false });
+
+  // Text reflow is reported, not treated as a failed mutation.
+  title.globalDrawBounds = { x: 40, y: 144, width: 310, height: 28 };
+  title.resize = (w: number) => {
+    title.globalDrawBounds.width = w;
+    title.globalDrawBounds.height = 50;
+  };
+  const reflow = h.handlers.resize_node({ guid: title.guid, width: 200, height: 28 });
+  assert.equal(reflow.ok, true);
+  assert.equal(reflow.verified, true);
+  assert.equal(reflow.reflowed, true);
+});
+
+test("reparent_node verifies the resulting parent relationship", () => {
+  const h = load();
+  const { home, card, rect } = seeded(h);
+  const target = h.group("Target");
+  home.addChild(target);
+
+  const same = h.handlers.reparent_node({ guid: rect.guid, parent: card.guid });
+  assert.equal(same.ok, true);
+  assert.equal(same.unchanged, true);
+  assert.equal(same.verified, true);
+
+  const moved = h.handlers.reparent_node({ guid: rect.guid, parent: target.guid });
+  assert.equal(moved.ok, true);
+  assert.equal(moved.verified, true);
+  assert.equal(moved.parentGuid, target.guid);
+  assert.equal(moved.oldParentGuid, card.guid);
+  assert.equal(moved.inNewParent, true);
+  assert.equal(moved.stillInOldParent, false);
+  assert.equal(moved.geometryPreserved, true);
+  assert.equal(rect.parent, target);
+  assert.equal(h.kids(card).includes(rect), false);
+
+  // A host that accepts addChild but leaves the node where it was must fail.
+  const stuck = h.group("Stuck");
+  home.addChild(stuck);
+  stuck.addChild = () => {};
+  const failed = h.handlers.reparent_node({ guid: rect.guid, parent: stuck.guid });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.code, "MUTATION_VERIFICATION_FAILED");
+  assert.equal(failed.expectedParentGuid, stuck.guid);
+});

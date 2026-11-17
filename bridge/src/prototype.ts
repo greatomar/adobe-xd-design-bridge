@@ -10,7 +10,7 @@
  */
 import type { XdLink } from "./xd-link.ts";
 
-export const PROTOTYPE_TRIGGERS = ["tap", "drag", "time", "voice"] as const;
+export const PROTOTYPE_TRIGGERS = ["tap", "drag", "time", "voice", "keys"] as const;
 export const PROTOTYPE_ACTIONS = ["goToArtboard", "overlay"] as const;
 
 export type PrototypeTrigger = (typeof PROTOTYPE_TRIGGERS)[number];
@@ -388,3 +388,4 @@ export async function resolveFlowManifest(link: XdLink, manifest: FlowManifest):
     },
   };
 }
+

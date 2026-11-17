@@ -135,7 +135,18 @@ export function startMockPlugin(port: number, token: string): Promise<void> {
         case "inspect_node": {
           const node = protoNodes.find((n) => n.guid === p.guid);
           if (!node) return reply(false, undefined, "node not found: " + String(p.guid), "node_not_found");
-          return reply(true, { ok: true, ...node, childCount: 0, mock: true });
+          return reply(true, {
+            ok: true,
+            ...node,
+            childCount: 0,
+            childrenTotal: 0,
+            childrenReturned: 0,
+            childrenOffset: typeof p.offset === "number" ? p.offset : 0,
+            childrenLimit: typeof p.limit === "number" ? p.limit : 100,
+            hasMore: false,
+            nextOffset: null,
+            mock: true,
+          });
         }
         case "prototype_focus": {
           const node = protoNodes.find((n) => n.guid === p.guid);

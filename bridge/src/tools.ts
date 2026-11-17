@@ -14,6 +14,14 @@ import { transformPathData } from "./assets/pathdata.ts";
 import { ASSET_CATEGORIES } from "./assets/types.ts";
 import type { AssetCategory, DesignContext, SearchQuery } from "./assets/types.ts";
 import { validateFlowManifest, resolveFlowManifest } from "./prototype.ts";
+import { PrototypeAutomationAdapter } from "./automation/adapter.ts";
+import { PowerShellUiaRunner } from "./automation/worker.ts";
+import { createXdPorts } from "./automation/ports.ts";
+import { findTargetOnlyExtras, findUnexpectedEdges, normalizeBatchEdges, runPrototypeGraphBatch, type BatchEdge } from "./automation/batch.ts";
+import { runPreflight } from "./automation/preflight.ts";
+import { GRAMMAR_VERSION, grammarSummary } from "./automation/grammar.ts";
+import { defaultRunner } from "./automation/worker.ts";
+import { classifyPanel, runApplyPending, summarizeExecution, type ApplyPorts, type ExecutionEvent, type PanelSnapshot } from "./automation/pending.ts";
 
 export interface McpContent {
   type: "text" | "image";
@@ -185,6 +193,101 @@ function briefAsset(a: {
   };
 }
 
+type GraphInput = { ok: true; edges: BatchEdge[] } | { ok: false; error: ToolResult };
+
+/**
+ * Shared edge input resolution for the graph tools: a flat edge list, a
+ * planner-shaped edge list, or a flow manifest resolved by the existing planner.
+ * The planner output is passed through unchanged.
+ */
+async function resolveGraphEdgeInput(link: XdLink, a: Record<string, unknown>): Promise<GraphInput> {
+  let edgeInput: unknown = Array.isArray(a.edges) ? a.edges : null;
+
+  if (!edgeInput && a.manifest) {
+    const validated = validateFlowManifest(a.manifest);
+    if (!validated.ok) return { ok: false, error: json({ ok: false, code: "invalid_manifest", error: validated.error }, true) };
+    const resolved = await resolveFlowManifest(link, validated.manifest);
+    const blocked = resolved.edges.filter((e) => !e.ready);
+    if (blocked.length > 0) {
+      return {
+        ok: false,
+        error: json({
+          ok: false,
+          code: "unresolved_edges",
+          error: `${blocked.length} edge(s) could not be resolved; nothing was authored`,
+          problems: resolved.problems,
+          stats: resolved.stats,
+        }, true),
+      };
+    }
+    edgeInput = resolved.edges.map((e) => ({
+      source: e.sourceNode.guid ?? e.sourceNode.input,
+      target: e.targetArtboard.guid ?? e.targetArtboard.input,
+      trigger: e.trigger,
+      action: e.action,
+      transition: e.transition?.type ?? "dissolve",
+      duration: e.transition?.duration ?? 0.3,
+      sourceRole: e.sourceRole,
+      note: e.note,
+    }));
+  }
+
+  if (!edgeInput) return { ok: false, error: json({ ok: false, code: "invalid_params", error: "provide edges[] or a flow manifest" }, true) };
+  const normalized = normalizeBatchEdges(edgeInput);
+  if (!normalized.ok) return { ok: false, error: json({ ok: false, code: "invalid_params", error: normalized.error }, true) };
+  return { ok: true, edges: normalized.edges };
+}
+
+/** Normalise the plugin's `batchExecuted` event into a flat op list. */
+function normaliseExecutionEvent(ev: { name?: string; data?: unknown; at?: number } | null): ExecutionEvent | null {
+  if (!ev || ev.name !== "batchExecuted") return null;
+  const data = (ev.data ?? {}) as Record<string, unknown>;
+  const raw = Array.isArray(data.results) ? (data.results as Array<Record<string, unknown>>) : [];
+  const flat: ExecutionEvent["results"] = [];
+  for (const entry of raw) {
+    const nested = Array.isArray(entry.results) ? (entry.results as Array<Record<string, unknown>>) : null;
+    if (nested) {
+      for (const inner of nested) flat.push({ op: String(inner.op ?? "?"), ok: inner.ok === true, error: typeof inner.error === "string" ? inner.error : null });
+    } else if (typeof entry.op === "string") {
+      flat.push({ op: entry.op, ok: entry.ok === true, error: typeof entry.error === "string" ? entry.error : null });
+    }
+  }
+  return {
+    name: "batchExecuted",
+    at: typeof ev.at === "number" ? ev.at : typeof data.at === "number" ? data.at : 0,
+    results: flat,
+    error: typeof data.error === "string" ? data.error : null,
+    batch: Array.isArray(data.batch) ? (data.batch as string[]) : [],
+    resultCount: flat.length,
+  };
+}
+
+function pendingPorts(link: XdLink, runner: ReturnType<typeof defaultRunner>): ApplyPorts {
+  return {
+    async readPanel(): Promise<PanelSnapshot> {
+      const r = await runner.run("panel_state", {}, { timeoutMs: 25_000 });
+      if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`);
+      return r.result as unknown as PanelSnapshot;
+    },
+    async clickApply() {
+      const r = await runner.run("click_apply", {}, { timeoutMs: 45_000 });
+      if (!r.ok) return { clicked: false, detail: `${r.error.code}: ${r.error.message}` };
+      return r.result as unknown as { clicked: boolean; reason?: string; detail?: string; executionStartedObserved?: boolean };
+    },
+    readEvent() {
+      return normaliseExecutionEvent(link.lastEvent);
+    },
+    async readDocument() {
+      const r = await link.execute("get_document_info", {});
+      if (!r.ok) throw new Error(r.error ?? "get_document_info failed");
+      const d = (r.result ?? {}) as Record<string, unknown>;
+      const nested = (d.document ?? {}) as Record<string, unknown>;
+      const doc = Object.keys(nested).length ? nested : d;
+      return { artboards: Number(doc.artboardCount ?? 0), nodes: Number(doc.nodeCount ?? 0) };
+    },
+  };
+}
+
 export function buildTools(link: XdLink): Record<string, ToolDef> {
   const tools: Record<string, ToolDef> = {
     xd_health: {
@@ -196,7 +299,7 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
 
     xd_get_capabilities: {
       description:
-        "Capability discovery: bridge operation names and plugin runtime capabilities. Prototype flows/interactions can be inspected, but authoring wires is not exposed by Adobe XD's public plugin API.",
+        "Capability discovery: bridge operation names and plugin runtime capabilities. Prototype flows/interactions can be inspected; XD's public plugin API cannot author wires, so authoring uses a separate Windows UI Automation worker.",
       inputSchema: { type: "object", properties: {} },
       handler: async () =>
         json({
@@ -204,7 +307,13 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
           xdConnected: link.isConnected(),
           bridgeOperations: OP_KEYS,
           pluginCapabilities: link.pluginInfo.capabilities ?? null,
-          note: "Prototype inspection and validation are supported. Wire authoring is NOT: XD's interactions module is read-only and no documented public API creates, edits or deletes connections, so manual wiring in XD Prototype mode is required. MCP-assisted focusing, per-edge instructions and verification are supported (xd_prototype_plan / xd_prototype_prepare / xd_prototype_verify).",
+          prototypeAuthoring: {
+            pluginApi: "unsupported - XD's interactions module is read-only",
+            windowsUiAutomation: "xd_create_prototype_interaction (one interaction, verified through UXP read-back)",
+            probe: "xd_probe_xd_automation",
+            manualMode: "manual wiring in XD Prototype mode always remains available",
+          },
+          note: "Prototype inspection and validation are supported. XD's interactions module is read-only and no documented public API creates, edits or deletes connections. The bridge therefore authors one interaction by driving XD's own UI through Windows UI Automation (Layers list selection + Interaction pane controls) and then proves it with the UXP read-back. Planning stays in xd_prototype_plan; manual per-edge guidance stays in xd_prototype_prepare; verification stays in xd_prototype_verify / xd_validate_prototype.",
         }),
     },
 
@@ -260,7 +369,7 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
                     source: { type: "string", description: "source node GUID or exact semantic name, e.g. Home/PrimaryCTA" },
                     target: { type: "string", description: "target artboard GUID or exact artboard name" },
                     sourceRole: { type: "string", description: "human-readable role, echoed back in reports" },
-                    trigger: { enum: ["tap", "drag", "time", "voice"] },
+                    trigger: { enum: ["tap", "drag", "time", "voice", "keys"] },
                     action: { enum: ["goToArtboard", "overlay"] },
                     transition: { type: "object", properties: { type: { type: "string" }, duration: { type: "number", minimum: 0, maximum: 10 }, easing: { type: "string" } } },
                     overlay: { type: "object", properties: { x: { type: "number" }, y: { type: "number" } } },
@@ -286,7 +395,7 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
           wireCreated: false,
           nextStep: resolved.stats.blockedCount > 0
             ? "Resolve the reported problems before wiring; the plan returns diagnostics, it does not fix nodes."
-            : "For each ready edge: xd_prototype_prepare (queued — click Execute pending), wire it in XD Prototype mode, then xd_prototype_verify. Finish with xd_validate_prototype.",
+            : "Author the ready edges with xd_create_prototype_graph (serial, per-edge verified), then confirm with xd_validate_prototype. Manual fallback per edge: xd_prototype_prepare, then xd_prototype_verify.",
         });
       },
     },
@@ -347,9 +456,18 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
     },
 
     xd_inspect_node: {
-      description: "Inspect one node by guid: full writable properties, style, and children summary.",
-      inputSchema: { type: "object", properties: { guid: { type: "string" } }, required: ["guid"] },
-      handler: (a) => opCall(link, "inspect_node", { guid: a.guid }),
+      description:
+        "Inspect one node by guid: full writable properties, style, and a paginated children summary. childrenTotal is authoritative; hasMore/nextOffset say whether the returned page is complete.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          guid: { type: "string" },
+          limit: { type: "integer", minimum: 1, maximum: 500, description: "Page size for children (default 100)." },
+          offset: { type: "integer", minimum: 0, description: "Child index to start from (default 0)." },
+        },
+        required: ["guid"],
+      },
+      handler: (a) => opCall(link, "inspect_node", { guid: a.guid, limit: a.limit, offset: a.offset }),
     },
 
     xd_search_nodes: {
@@ -550,7 +668,12 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
       description: OPERATIONS.move_node.description,
       inputSchema: {
         type: "object",
-        properties: { guid: { type: "string" }, x: { type: "number" }, y: { type: "number" }, relative: { type: "boolean" } },
+        properties: {
+          guid: { type: "string" },
+          x: { type: "number", description: "Parent-relative x (or additive dx when relative:true)." },
+          y: { type: "number", description: "Parent-relative y (or additive dy when relative:true)." },
+          relative: { type: "boolean", description: "Treat x/y as an offset from the current position. Default false." },
+        },
         required: ["guid", "x", "y"],
       },
       handler: (a) => opCall(link, "move_node", a),
@@ -1123,6 +1246,242 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
           lastEvent: link.lastEvent,
         }),
     },
+
+    xd_probe_xd_automation: {
+      description:
+        "Diagnostic only: report what Adobe XD exposes to Windows UI Automation right now (window, Prototype workspace toggle, Interaction pane controls, Layers list, and whether canvas objects are exposed at all). Sends no input and changes no document state.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async () => {
+        const adapter = new PrototypeAutomationAdapter(createXdPorts(link, defaultRunner()));
+        const r = await adapter.probe();
+        if (!r.ok) return json({ ok: false, automationPath: "windows-ui-automation", error: r.error }, true);
+        return json({ ok: true, automationPath: "windows-ui-automation", probe: r.result });
+      },
+    },
+
+    xd_pending_status: {
+      description:
+        "Read the DesignBridge panel's pending state through Windows UI Automation (execBtn + queueInfo) and the bridge's last execution event. Reports the actual source of every field; never infers a queue depth from bridge request counters.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async () => {
+        const ports = pendingPorts(link, defaultRunner());
+        const panel = await ports.readPanel();
+        const status = classifyPanel(panel, ports.readEvent());
+        return json({ ok: true, observedAt: Date.now(), panel, status });
+      },
+    },
+
+    xd_apply_pending: {
+      description:
+        "Activate the panel's real Apply button through Windows UI Automation and wait for the plugin's batchExecuted event. State-driven: refuses when the queue is idle or a batch is executing, never clicks twice, and never reports success from the click alone. Returns the execution results plus an independent document read-back.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          timeoutMs: { type: "number", minimum: 1000, maximum: 120000, description: "max wait for batchExecuted (default 30000)" },
+          expectArtboards: { type: "number", description: "optional: independently verify the artboard count after execution" },
+        },
+      },
+      handler: async (a) => {
+        const ports = pendingPorts(link, defaultRunner());
+        const result = await runApplyPending(ports, {
+          timeoutMs: typeof a.timeoutMs === "number" ? a.timeoutMs : undefined,
+          expect: typeof a.expectArtboards === "number" ? { artboards: a.expectArtboards } : undefined,
+        });
+        const ok = result.status === "completed" || result.status === "partial_success";
+        return json(result, !ok);
+      },
+    },
+
+    xd_verify_pending: {
+      description:
+        "Independent verification of the last applied batch: panel state, the batchExecuted event (with an optional sinceAt cursor), per-op outcome summary and the document's artboard/node counts. Reports `unknown` when the event carries no results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sinceAt: { type: "number", description: "only accept an execution event newer than this epoch-ms cursor" },
+          expectArtboards: { type: "number" },
+        },
+      },
+      handler: async (a) => {
+        const ports = pendingPorts(link, defaultRunner());
+        const panel = await ports.readPanel();
+        const event = ports.readEvent();
+        const summary = summarizeExecution(event);
+        const doc = await ports.readDocument().catch(() => null);
+        const since = typeof a.sinceAt === "number" ? a.sinceAt : null;
+        const eventIsNew = event ? (since === null || event.at > since) : false;
+        const countsOk = typeof a.expectArtboards === "number" && doc ? doc.artboards === a.expectArtboards : null;
+        const verdict = !event
+          ? "no-execution-event"
+          : !eventIsNew
+            ? "stale-event"
+            : summary.status;
+        return json({
+          ok: verdict === "completed" || verdict === "partial_success",
+          verdict,
+          event: event ? { at: event.at, ageMs: Date.now() - event.at, resultCount: event.resultCount, batch: event.batch } : null,
+          summary,
+          document: doc,
+          expectedArtboards: typeof a.expectArtboards === "number" ? a.expectArtboards : null,
+          artboardCountOk: countsOk,
+          panelStatus: classifyPanel(panel, event),
+        }, !(verdict === "completed" || verdict === "partial_success"));
+      },
+    },
+    xd_get_prototype_grammar: {
+      description:
+        "Measured Adobe XD 61 prototype grammar: which trigger/action/transition combinations are verified_supported, verified_unsupported, conditionally_supported or unverified, the available trigger slots, and the one-interaction-per-trigger rule. Derived from live runs, not from dropdown contents.",
+      inputSchema: { type: "object", properties: {} },
+      handler: async () => json(grammarSummary()),
+    },
+
+    xd_validate_prototype_plan: {
+      description:
+        "READ-ONLY preflight before authoring. Classifies every planned edge against the measured XD grammar and the live document: already_exists / safe_to_create / conflict / unsupported_combination / unsupported_trigger / duplicate_trigger_slot / unresolved_source / unresolved_target / unverified_combination. Never mutates the document and returns every blocker at once.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          edges: { type: "array", minItems: 1, maxItems: 200, items: { type: "object" } },
+          manifest: { type: "object", description: "alternative to edges: a flow manifest resolved by the existing planner" },
+        },
+      },
+      handler: async (a) => {
+        const input = await resolveGraphEdgeInput(link, a);
+        if (!input.ok) return input.error;
+        const ports = createXdPorts(link, defaultRunner());
+        const report = await runPreflight(ports, input.edges, GRAMMAR_VERSION);
+        return json(report, !report.ok);
+      },
+    },
+    xd_create_prototype_interaction: {
+      description: "Create ONE real Adobe XD prototype interaction through Windows UI Automation and verify it through the UXP read-back. XD's plugin API cannot author wires, so the bridge drives XD's own UI (Layers list + Interaction pane) with documented UI Automation patterns - no coordinates, no connector dragging. Returns created:true + verified:true ONLY when the document itself contains the expected interaction (source, destination, tap, goToArtboard, transition, duration). Requires Adobe XD running with the document open.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          source: { type: "string", description: "source node or artboard: exact name or GUID" },
+          target: { type: "string", description: "destination artboard: exact name or GUID" },
+          trigger: { enum: ["tap", "drag", "time", "voice", "keys"], description: "default tap; keys is refused by the platform grammar" },
+          action: { enum: ["goToArtboard", "overlay"], description: "default goToArtboard (XD shows 'Transition')" },
+          transition: { type: "string", description: "default dissolve (XD shows 'Dissolve')" },
+          duration: { type: "number", minimum: 0, maximum: 10, description: "seconds, default 0.3" },
+          mode: { enum: ["design", "prototype"], description: "workspace to drive; default prototype" },
+        },
+        required: ["source", "target"],
+      },
+      handler: async (a) => {
+        const adapter = new PrototypeAutomationAdapter(createXdPorts(link, defaultRunner()));
+        const result = await adapter.createInteraction(a);
+        return json(result, !result.ok);
+      },
+    },
+
+    xd_create_prototype_graph: {
+      description:
+        "Author a prototype GRAPH: many interactions, executed strictly serially, each verified through the UXP read-back before the next starts, then validated with the existing xd_validate_prototype. Accepts a flat edge list or an xd_prototype_plan-style edge list (sourceNode/targetArtboard) or a flow manifest (resolved by xd_prototype_plan's resolver). Idempotent: an edge that already exists is reported as already_exists and never duplicated; an incompatible existing interaction is reported as conflict and never edited or deleted. Per-edge results are authoritative - the batch status is never better than its edges.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          edges: {
+            type: "array", minItems: 1, maxItems: 200,
+            items: {
+              type: "object",
+              properties: {
+                source: { type: "string", description: "source node or artboard: exact name or GUID" },
+                target: { type: "string", description: "destination artboard: exact name or GUID" },
+                trigger: {
+                  enum: ["tap", "drag", "time", "voice", "keys"],
+                  description: "keys (Keys & Gamepad) is accepted so preflight can classify it; it is never authorable",
+                },
+                action: { enum: ["goToArtboard", "overlay"] },
+                transition: {
+                  description: "transition name, or the planner's {type, duration} object (xd_prototype_plan output is accepted verbatim)",
+                  anyOf: [
+                    { type: "string" },
+                    { type: "object", properties: { type: { type: "string" }, duration: { type: "number", minimum: 0, maximum: 10 } } },
+                  ],
+                },
+                duration: { type: "number", minimum: 0, maximum: 10 },
+                mode: { enum: ["design", "prototype"] },
+                sourceRole: { type: "string" },
+              },
+            },
+          },
+          manifest: {
+            type: "object",
+            description: "alternative to edges: a flow manifest {name?, home?, edges[]} resolved with the existing planner",
+          },
+          failurePolicy: { enum: ["continue_on_error", "fail_fast"], description: "default continue_on_error" },
+          mode: {
+            enum: ["create", "repair", "reconcile"],
+            description: "create (default, never edits existing wires) | repair (delete a conflicting wire in the same trigger slot, then create) | reconcile (repair + treat non-desired same-slot wires as removable)",
+          },
+          validate: { type: "boolean", description: "run xd_validate_prototype at the end (default true)" },
+          strictPreflight: {
+            type: "boolean",
+            description: "when true, run xd_validate_prototype_plan first and create NOTHING if any blocker exists (default false, backward compatible)",
+          },
+        },
+      },
+      handler: async (a) => {
+        const input = await resolveGraphEdgeInput(link, a);
+        if (!input.ok) return input.error;
+        const normalized = { ok: true as const, edges: input.edges };
+
+        if (a.strictPreflight === true) {
+          const preflightPorts = createXdPorts(link, defaultRunner());
+          const preflight = await runPreflight(preflightPorts, normalized.edges, GRAMMAR_VERSION);
+          if (!preflight.ok) {
+            return json({
+              ok: false,
+              status: "preflight_blocked",
+              mode: a.mode ?? "create",
+              created: 0,
+              message: `${preflight.blocking} blocker(s) found; nothing was authored`,
+              preflight,
+            }, true);
+          }
+        }
+
+        const runner = defaultRunner();
+        const ports = createXdPorts(link, runner);
+        const adapter = new PrototypeAutomationAdapter(ports);
+        const policy = a.failurePolicy === "fail_fast" ? "fail_fast" : "continue_on_error";
+        const mode = a.mode === "repair" || a.mode === "reconcile" ? a.mode : "create";
+        const runValidation = a.validate !== false;
+
+        const result = await runPrototypeGraphBatch(adapter, normalized.edges, {
+          failurePolicy: policy,
+          mode,
+          onProgress: (line) => log("info", `[graph] ${line}`),
+          validate: runValidation
+            ? async (requirements) => {
+              const r = await link.execute("validate_prototype", { requiredConnections: requirements });
+              if (!r.ok) throw new Error(r.error ?? "validate_prototype failed");
+              const rep = (r.result ?? {}) as Record<string, unknown>;
+              const summary = (rep.summary ?? {}) as Record<string, unknown>;
+              const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
+              const observed = await ports.readEdges().catch(() => []);
+              return {
+                verdict: typeof rep.verdict === "string" ? rep.verdict : null,
+                valid: rep.valid === true,
+                coverage: num(summary.coverage),
+                expectedCount: num(summary.expectedCount),
+                missingCount: num(summary.missingCount),
+                incorrectCount: num(summary.incorrectCount),
+                extraCount: num(summary.extraCount),
+                unexpected: findUnexpectedEdges(observed, requirements),
+                unexpectedOnTargets: findTargetOnlyExtras(observed, requirements),
+                note: "verdict/missing/incorrect/extraCount come from xd_validate_prototype. extraCount is document-wide; `unexpected` is scoped to this batch's source nodes.",
+                missing: Array.isArray(rep.missing) ? rep.missing : [],
+                incorrect: Array.isArray(rep.incorrect) ? rep.incorrect : [],
+              };
+            }
+            : undefined,
+        });
+
+        return json(result, !result.ok);
+      },
+    },
   };
   return tools;
 }
@@ -1133,3 +1492,12 @@ export function toolList(): Array<{ name: string; description: string; inputSche
   const tools = buildTools(link);
   return Object.entries(tools).map(([name, t]) => ({ name, description: t.description, inputSchema: t.inputSchema }));
 }
+
+
+
+
+
+
+
+
+

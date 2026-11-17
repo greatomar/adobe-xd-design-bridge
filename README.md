@@ -74,7 +74,7 @@ validation, orchestration and assets; the agent owns design judgement.
 | Structure | duplicate, delete, ungroup, make/replace stack background |
 | Output | artboard/selection PNG export, document validation, design-consistency audit |
 | Assets | image fill, image replace, native file import |
-| Prototype | flow-manifest resolution, node focus/scroll, per-edge preparation and verification, full pass/fail report — inspection and validation only; XD cannot author wires |
+| Prototype | flow-manifest resolution, node focus/scroll, per-edge preparation and verification, full pass/fail report; wire authoring through Windows UI Automation (POC) |
 
 ### Prototype wiring assistant (4 tools)
 
@@ -98,6 +98,34 @@ assistant removes the search-and-click work without pretending otherwise:
 
 Every one of these reports `authoringSupported:false` and `createdWire:false`.
 See [`docs/prototype-wiring-workflow.md`](docs/prototype-wiring-workflow.md).
+
+### Prototype authoring through Windows UI Automation (POC, 2 tools)
+
+XD's plugin API cannot author a wire, so authoring is done **outside** it: a
+small Windows UI Automation worker drives XD's own interface (Layers list
+selection + Interaction pane controls) and the result is then proven through the
+UXP read-back. No coordinates, no connector dragging.
+
+- **`xd_create_prototype_interaction`** - `{source, target, trigger, action,
+  transition, duration}` -> `created` + `verified` only when the document
+  itself contains the expected interaction.
+- **`xd_create_prototype_graph`** - many edges, executed serially, each verified
+  through the UXP read-back, then validated with `xd_validate_prototype`.
+  Idempotent (`already_exists`), non-destructive (`conflict`), with
+  `continue_on_error` / `fail_fast` policies.
+- **`xd_validate_prototype_plan`** - read-only preflight: classifies every
+  planned edge against the measured XD grammar and the live document before
+  anything is authored, and reports every blocker at once.
+- **`xd_get_prototype_grammar`** - the measured grammar itself (which
+  trigger/action/transition combinations are actually authorable).
+- **`xd_pending_status` / `xd_apply_pending` / `xd_verify_pending`** - read the
+  panel queue, activate the real Apply control through Windows UI Automation, and
+  verify the resulting `batchExecuted` event plus the document change
+  (`docs/apply-pending-automation.md`).
+- **`xd_probe_xd_automation`** - diagnostic report of what XD exposes to
+  accessibility, including the controls that are *not* exposed (the canvas).
+
+See [`docs/prototype-gui-automation.md`](docs/prototype-gui-automation.md).
 
 ### Design asset intelligence (11 tools)
 
@@ -263,6 +291,7 @@ examples/          sample design payloads
 |---|---|
 | `docs/asset-intelligence.md` | asset sources, licensing, search, caching, XD insertion |
 | `docs/prototype-wiring-workflow.md` | flow manifest schema, assisted wiring pipeline, verification states |
+| `docs/prototype-gui-automation.md` | Windows UI Automation authoring layer, exposed controls, failure codes |
 | `docs/mcp-operation-schema.md` | every tool and its parameters |
 | `docs/xd-capability-matrix.md` | what XD's API can and cannot do |
 | `ARCHITECTURE.md` | internals and design decisions |
@@ -287,3 +316,6 @@ Third-party assets are **not** bundled in this repository. Icon sets,
 fonts and design resources referenced by the asset layer keep their own
 licenses (ISC, MIT, Apache-2.0, CC0, OFL), which are recorded per asset and
 surfaced by `design_asset_license`.
+
+
+

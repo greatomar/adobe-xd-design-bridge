@@ -28,6 +28,13 @@ describes its module as **read-only**. It exposes `flows`, `allInteractions`, no
 details. The official `commands` reference has no wire-authoring command. No supported public XD
 UXP API to create, modify, or delete wires was found.
 
+Authoring is therefore attempted from **outside** the plugin API, through a separate Windows UI
+Automation layer that drives XD's own interface and is verified by the UXP read-back
+(`docs/prototype-gui-automation.md`, POC scope: one interaction). That layer does not use
+undocumented APIs, memory or `.xd` file manipulation; it only operates controls XD itself exposes
+to accessibility. When the required control is not exposed, it reports `UNSUPPORTED_XD_UI` and
+stops instead of clicking coordinates.
+
 What the bridge therefore implements is a **wiring assistant**, not an authoring API:
 
 | Capability | Status |

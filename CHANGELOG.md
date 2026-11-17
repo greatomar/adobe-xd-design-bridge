@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.1.6 - 2026-11-18 (Mutation contracts: no more silent no-ops)
+
+Stage 9 visual work exposed operations that returned `ok:true` without performing the mutation.
+Every case was traced through schema -> validation -> plugin handler -> read-back and closed.
+
+### Fixed
+- **`update_node` rejects geometry.** `frame`/`x`/`y`/`width`/`height` now return
+  `UNSUPPORTED_PROPERTY` naming `move_node`/`resize_node`; unknown keys return `UNKNOWN_PROPERTY`;
+  validation is atomic, so a rejected payload queues nothing.
+- **`update_node` dropped `visible` and `locked`.** The validated shape was nested one level too
+  deep, so those two properties never reached the plugin while the op reported success. This is the
+  root cause of the suspected "defect E" (`{visible:false}` changing nothing).
+- **`move_node` states and verifies its coordinate contract.** Both coordinates are required and
+  parent-relative; the result returns `coordinateSystem`, `before`/`after`/`delta`, `moved`, and a
+  `placement`/`safe` verdict that flags a node pushed outside its own artboard.
+- **`resize_node` verifies the applied size.** Reads the bounds back, compares within a documented
+  0.5 px tolerance, returns `MUTATION_VERIFICATION_FAILED` when the host ignored the request, and
+  treats text reflow as `reflowed` instead of a failure. Relative scale factors are validated
+  separately from absolute dimensions.
+- **`reparent_node` verifies the relationship.** Checks the actual parent, membership in the new
+  parent, absence from the old one, and geometry preservation; a host that accepts `addChild`
+  without moving the node now fails loudly instead of returning success.
+- **`inspect_node` no longer truncates silently.** The plugin re-enumerates children and returns
+  `childrenTotal`/`childrenReturned`/`childrenOffset`/`childrenLimit`/`hasMore`/`nextOffset`;
+  `childCount` is preserved. `limit` (1..500) and `offset` (>= 0) are validated bridge-side, and the
+  default page (100) covers reasonably sized nodes completely.
+
+### Documentation
+- New `docs/mutation-contracts.md` records the measured contracts and the queued/applied/verified
+  distinction the agent must respect.
+
+### Tests
+- 11 new tests (316/316 passing): plugin-side pagination boundaries (0/1/30/35 children), move
+  placement and off-artboard reporting, resize verification failure and text reflow, reparent
+  verification failure, and bridge-side rejection of geometry/unknown properties, pagination
+  validation, coordinate requirements and queue-free rejection through a real `XdLink`.
+
 ## 1.1.5 - 2026-11-16 (Shape geometry is verified, not assumed)
 
 Live work on the login screen found `create_ellipse` returning `ok:true` with a GUID for a node it

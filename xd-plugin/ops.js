@@ -299,6 +299,51 @@
     }
   }
 
+  /** Nearest Artboard ancestor of a node, or null when the node is loose on the canvas. */
+  function ancestorArtboard(node) {
+    let cur = node ? node.parent : null;
+    let guard = 0;
+    while (cur && guard++ < 100) {
+      if (isArtboard(cur)) return cur;
+      cur = cur.parent;
+    }
+    return null;
+  }
+
+  function boundsOf(node) {
+    const b = node && node.globalDrawBounds;
+    return b ? { x: b.x, y: b.y, width: b.width, height: b.height } : null;
+  }
+
+  /** Geometry read-back comparison with an explicit, documented tolerance (XD sub-pixel rounding). */
+  function boundsDelta(before, after) {
+    if (!before || !after) return null;
+    return {
+      dx: round2(after.x - before.x),
+      dy: round2(after.y - before.y),
+      dw: round2(after.width - before.width),
+      dh: round2(after.height - before.height),
+    };
+  }
+
+  function round2(v) {
+    return Math.round(v * 100) / 100;
+  }
+
+  /** Report whether the node's visible bounds still sit inside its own artboard. */
+  function artboardPlacement(node, bounds) {
+    const artboard = ancestorArtboard(node);
+    if (!artboard || !bounds) return { checked: false, artboardGuid: null, inside: null };
+    const ab = artboard.globalDrawBounds;
+    if (!ab) return { checked: false, artboardGuid: artboard.guid, inside: null };
+    const inside =
+      bounds.x >= ab.x - 0.5 &&
+      bounds.y >= ab.y - 0.5 &&
+      bounds.x + bounds.width <= ab.x + ab.width + 0.5 &&
+      bounds.y + bounds.height <= ab.y + ab.height + 0.5;
+    return { checked: true, artboardGuid: artboard.guid, artboardName: artboard.name, inside };
+  }
+
   /** Resolve the scenegraph root without ever throwing: {root} | {error, code}. */
   function sceneRoot() {
     let root = null;
@@ -1030,7 +1075,27 @@
     inspect_node: (p) => {
       const nr = requireNode(p.guid);
       if (!nr.ok) return nr;
-      return { ok: true, node: inspectDetail(nr.node) };
+      const detail = inspectDetail(nr.node);
+      const declared = typeof detail.childCount === "number" ? detail.childCount : 0;
+      let all = Array.isArray(detail.children) ? detail.children : [];
+      // The detail builder caps its list; re-enumerate so childrenTotal is
+      // authoritative and pagination never silently claims completeness.
+      if (all.length < declared && nr.node.children) {
+        all = [];
+        const kids = nr.node.children;
+        for (let i = 0; i < kids.length; i++) all.push(nodeSummary(kids.at(i)));
+      }
+      const limit = typeof p.limit === "number" ? p.limit : 100;
+      const offset = typeof p.offset === "number" ? p.offset : 0;
+      const page = all.slice(offset, offset + limit);
+      detail.childrenTotal = declared;
+      detail.childrenReturned = page.length;
+      detail.childrenOffset = offset;
+      detail.childrenLimit = limit;
+      detail.hasMore = offset + page.length < declared;
+      detail.nextOffset = detail.hasMore ? offset + page.length : null;
+      detail.children = page;
+      return { ok: true, node: detail };
     },
 
     search_nodes: (p) => {
@@ -1391,14 +1456,54 @@
       if ((node.rotation || parent.rotation || parent.rotationX || parent.rotationY)) {
         return { ok: false, code: "unsupported_reparent_transform", error: "reparenting rotated or 3D-transformed nodes is not supported by this operation" };
       }
-      if (node.parent === parent) return { ok: true, guid: node.guid, oldParentGuid: parent.guid, parentGuid: parent.guid, unchanged: true };
-      const oldParentGuid = node.parent ? node.parent.guid : null;
+      if (node.parent === parent) return { ok: true, guid: node.guid, oldParentGuid: parent.guid, parentGuid: parent.guid, unchanged: true, verified: true };
+      const previousParent = node.parent || null;
+      const oldParentGuid = previousParent ? previousParent.guid : null;
       const global = node.globalDrawBounds || { x: 0, y: 0 };
       const parentBounds = parent === sc.root ? { x: 0, y: 0 } : parent.globalDrawBounds || { x: 0, y: 0 };
       node.removeFromParent();
       parent.addChild(node);
       setPosition(node, { x: global.x - parentBounds.x, y: global.y - parentBounds.y });
-      return { ok: true, guid: node.guid, oldParentGuid, parentGuid: parent.guid };
+      // Read the relationship back instead of trusting the host call: XD can
+      // accept addChild and still leave the node under its previous parent.
+      const actualParent = node.parent || null;
+      const actualParentGuid = actualParent ? actualParent.guid : null;
+      const inNewParent = !!findNode(parent, node.guid);
+      const stillInOldParent = previousParent && previousParent !== parent ? !!findNode(previousParent, node.guid) : false;
+      const after = boundsOf(node);
+      const geometryDelta = boundsDelta(
+        { x: global.x, y: global.y, width: global.width, height: global.height },
+        after,
+      );
+      const geometryPreserved = !geometryDelta
+        ? null
+        : Math.abs(geometryDelta.dx) <= 1 && Math.abs(geometryDelta.dy) <= 1 &&
+          Math.abs(geometryDelta.dw) <= 1 && Math.abs(geometryDelta.dh) <= 1;
+      if (actualParentGuid !== parent.guid || !inNewParent || stillInOldParent) {
+        return {
+          ok: false,
+          code: "MUTATION_VERIFICATION_FAILED",
+          error: "reparent_node did not produce the requested parent relationship",
+          guid: node.guid,
+          expectedParentGuid: parent.guid,
+          actualParentGuid,
+          inNewParent,
+          stillInOldParent,
+          oldParentGuid,
+        };
+      }
+      return {
+        ok: true,
+        guid: node.guid,
+        oldParentGuid,
+        parentGuid: actualParentGuid,
+        verified: true,
+        inNewParent,
+        stillInOldParent,
+        geometryPreserved,
+        before: { x: global.x, y: global.y, width: global.width, height: global.height },
+        after,
+      };
     },
 
     rotate_node: (p) => {
@@ -1553,21 +1658,47 @@
       const nr = requireEditableNode(p.guid);
       if (!nr.ok) return nr;
       const n = nr.node;
+      const before = boundsOf(n);
+      // Contract (measured on XD 61): both branches are PARENT-RELATIVE.
+      // `relative` is an additive offset on the current position; the default
+      // is an absolute position inside the node's current parent. Document
+      // coordinates are never accepted implicitly.
       if (p.relative) {
         n.moveInParentCoordinates(p.x, p.y);
       } else {
         setPosition(n, { x: p.x, y: p.y });
       }
-      return { ok: true, guid: n.guid };
+      const after = boundsOf(n);
+      const delta = boundsDelta(before, after);
+      const placement = artboardPlacement(n, after);
+      const moved = !!delta && (Math.abs(delta.dx) > 0.01 || Math.abs(delta.dy) > 0.01);
+      return {
+        ok: true,
+        guid: n.guid,
+        coordinateSystem: "parent-relative",
+        requested: { x: p.x, y: p.y, relative: !!p.relative },
+        before,
+        after,
+        delta,
+        moved,
+        parentGuid: n.parent ? n.parent.guid : null,
+        parentName: n.parent ? n.parent.name : null,
+        placement,
+        // A move that lands outside the node's own artboard is reported as
+        // applied-but-unsafe; it is never described as a safe mutation.
+        safe: placement.checked ? placement.inside === true : null,
+      };
     },
 
     resize_node: (p) => {
       const nr = requireEditableNode(p.guid);
       if (!nr.ok) return nr;
       const n = nr.node;
+      const before = boundsOf(n);
       const scaled = p.relative
         ? { w: (n.globalDrawBounds ? n.globalDrawBounds.width : 0) * (p.width || 1), h: (n.globalDrawBounds ? n.globalDrawBounds.height : 0) * (p.height || 1) }
         : { w: p.width !== undefined ? p.width : (n.globalDrawBounds ? n.globalDrawBounds.width : 0), h: p.height !== undefined ? p.height : (n.globalDrawBounds ? n.globalDrawBounds.height : 0) };
+      const requested = { width: round2(scaled.w), height: round2(scaled.h), relative: !!p.relative };
       try {
         if (n.constructor && n.constructor.name === "Artboard") {
           n.width = scaled.w;
@@ -1579,7 +1710,40 @@
         if (n.width !== undefined) n.width = scaled.w;
         if (n.height !== undefined) n.height = scaled.h;
       }
-      return { ok: true, guid: n.guid };
+      const after = boundsOf(n);
+      const TOLERANCE = 0.5;
+      const widthOk = !after || Math.abs(after.width - requested.width) <= TOLERANCE;
+      const heightOk = !after || Math.abs(after.height - requested.height) <= TOLERANCE;
+      const kind = n.constructor ? n.constructor.name : "";
+      // Text nodes reflow: XD may adjust the box to fit the glyphs, so a height
+      // mismatch is reported but is not treated as a failed mutation.
+      const verified = widthOk && (kind === "Text" ? true : heightOk);
+      if (!widthOk || (kind !== "Text" && !heightOk)) {
+        return {
+          ok: false,
+          code: "MUTATION_VERIFICATION_FAILED",
+          error: "resize_node was accepted by the host but the requested size was not applied",
+          guid: n.guid,
+          coordinateSystem: "parent-relative",
+          expected: requested,
+          actual: after,
+          before,
+          tolerance: TOLERANCE,
+          verified: false,
+        };
+      }
+      return {
+        ok: true,
+        guid: n.guid,
+        coordinateSystem: "parent-relative",
+        requested,
+        before,
+        after,
+        delta: boundsDelta(before, after),
+        tolerance: TOLERANCE,
+        verified,
+        reflowed: kind === "Text" && !heightOk,
+      };
     },
 
     apply_style: (p) => {
@@ -2135,3 +2299,4 @@
   window.__xdBridgeOps = { handlers, mutateOps, nonMutating };
   console.log("BOOT: ops registered (" + Object.keys(handlers).length + " handlers) on window.__xdBridgeOps");
 })();
+

@@ -1,0 +1,450 @@
+﻿{
+    "probe":  {
+                  "xd":  {
+                             "className":  "Windows.UI.Core.CoreWindow",
+                             "elementCount":  330,
+                             "processId":  1272,
+                             "running":  true,
+                             "rect":  {
+                                          "y":  59,
+                                          "width":  1362,
+                                          "height":  909,
+                                          "x":  551
+                                      },
+                             "windowName":  "Adobe XD"
+                         },
+                  "diagnostics":  {
+                                      "xdWindowFound":  true,
+                                      "prototypeModeControlFound":  true,
+                                      "designModeControlFound":  true,
+                                      "layersPanelToggleFound":  true,
+                                      "layersPanelFound":  true,
+                                      "interactionPaneFound":  true,
+                                      "addInteractionFound":  true,
+                                      "triggerControlFound":  true,
+                                      "actionControlFound":  true,
+                                      "targetControlFound":  true,
+                                      "transitionControlFound":  true,
+                                      "durationControlFound":  true,
+                                      "sourceLayerFound":  null
+                                  },
+                  "modes":  {
+                                "prototype":  "On",
+                                "design":  "Off"
+                            },
+                  "interaction":  {
+                                      "action":  "Transition",
+                                      "labels":  {
+                                                     "destination":  "interactionPopoverTargetPopup",
+                                                     "transition":  "interactionPopoverTransitionPopup",
+                                                     "action":  "interactionPopoverActionPopup",
+                                                     "trigger":  "interactionPopoverTriggerEventPopup"
+                                                 },
+                                      "transition":  "Dissolve",
+                                      "panePresent":  true,
+                                      "destination":  "PrototypeTest/Target",
+                                      "easing":  "None",
+                                      "editorOpen":  true,
+                                      "editorVisible":  true,
+                                      "addButton":  true,
+                                      "trigger":  "Tap",
+                                      "duration":  "0.3 s",
+                                      "enabled":  {
+                                                      "destination":  true,
+                                                      "transition":  true,
+                                                      "duration":  true,
+                                                      "action":  true,
+                                                      "trigger":  true
+                                                  }
+                                  },
+                  "exposed":  {
+                                  "prototypeModeToggle":  true,
+                                  "layerRowCount":  36,
+                                  "canvasChildCount":  0,
+                                  "designModeToggle":  true,
+                                  "interactionPane":  true,
+                                  "interactionControls":  true,
+                                  "canvasObjects":  false,
+                                  "layersPane":  true,
+                                  "canvas":  true,
+                                  "interactionEditorOpen":  true
+                              },
+                  "capabilities":  {
+                                       "interactionPaneDriven":  true,
+                                       "semanticLayerSelection":  true,
+                                       "mouseInputUsed":  false,
+                                       "uiaTree":  true,
+                                       "canvasObjects":  false
+                                   }
+              },
+    "timestamp":  "2026-11-17T20:39:25.3148548+03:00",
+    "request":  {
+                    "duration":  0.3,
+                    "action":  "Transition",
+                    "mode":  "prototype",
+                    "durationText":  "0.3 s",
+                    "source":  "PrototypeTest/Target",
+                    "trigger":  "Tap",
+                    "target":  "PrototypeTest/Source",
+                    "transition":  "Dissolve"
+                },
+    "automationOk":  true,
+    "observedInteraction":  {
+                                "action":  "Transition",
+                                "labels":  {
+                                               "destination":  "interactionPopoverTargetPopup",
+                                               "transition":  "interactionPopoverTransitionPopup",
+                                               "action":  "interactionPopoverActionPopup",
+                                               "trigger":  "interactionPopoverTriggerEventPopup"
+                                           },
+                                "transition":  "Dissolve",
+                                "panePresent":  true,
+                                "destination":  "PrototypeTest/Source",
+                                "easing":  "None",
+                                "editorOpen":  true,
+                                "editorVisible":  true,
+                                "addButton":  true,
+                                "trigger":  "Tap",
+                                "duration":  "0.3 s",
+                                "enabled":  {
+                                                "destination":  true,
+                                                "transition":  true,
+                                                "duration":  true,
+                                                "action":  true,
+                                                "trigger":  true
+                                            }
+                            },
+    "verified":  false,
+    "kind":  "live-automation-run",
+    "documentInvariant":  "Automation output is NOT verification. DesignBridge must read the interaction back through UXP.",
+    "steps":  [
+                  {
+                      "stage":  "probe",
+                      "result":  {
+                                     "diagnostics":  {
+                                                         "xdWindowFound":  true,
+                                                         "prototypeModeControlFound":  true,
+                                                         "designModeControlFound":  true,
+                                                         "layersPanelToggleFound":  true,
+                                                         "layersPanelFound":  true,
+                                                         "interactionPaneFound":  true,
+                                                         "addInteractionFound":  true,
+                                                         "triggerControlFound":  true,
+                                                         "actionControlFound":  true,
+                                                         "targetControlFound":  true,
+                                                         "transitionControlFound":  true,
+                                                         "durationControlFound":  true,
+                                                         "sourceLayerFound":  null
+                                                     },
+                                     "capabilities":  {
+                                                          "interactionPaneDriven":  true,
+                                                          "semanticLayerSelection":  true,
+                                                          "mouseInputUsed":  false,
+                                                          "uiaTree":  true,
+                                                          "canvasObjects":  false
+                                                      },
+                                     "exposed":  {
+                                                     "prototypeModeToggle":  true,
+                                                     "layerRowCount":  36,
+                                                     "canvasChildCount":  0,
+                                                     "designModeToggle":  true,
+                                                     "interactionPane":  true,
+                                                     "interactionControls":  true,
+                                                     "canvasObjects":  false,
+                                                     "layersPane":  true,
+                                                     "canvas":  true,
+                                                     "interactionEditorOpen":  true
+                                                 },
+                                     "xd":  {
+                                                "className":  "Windows.UI.Core.CoreWindow",
+                                                "elementCount":  330,
+                                                "processId":  1272,
+                                                "running":  true,
+                                                "rect":  {
+                                                             "y":  59,
+                                                             "width":  1362,
+                                                             "height":  909,
+                                                             "x":  551
+                                                         },
+                                                "windowName":  "Adobe XD"
+                                            },
+                                     "interaction":  {
+                                                         "action":  "Transition",
+                                                         "labels":  {
+                                                                        "destination":  "interactionPopoverTargetPopup",
+                                                                        "transition":  "interactionPopoverTransitionPopup",
+                                                                        "action":  "interactionPopoverActionPopup",
+                                                                        "trigger":  "interactionPopoverTriggerEventPopup"
+                                                                    },
+                                                         "transition":  "Dissolve",
+                                                         "panePresent":  true,
+                                                         "destination":  "PrototypeTest/Target",
+                                                         "easing":  "None",
+                                                         "editorOpen":  true,
+                                                         "editorVisible":  true,
+                                                         "addButton":  true,
+                                                         "trigger":  "Tap",
+                                                         "duration":  "0.3 s",
+                                                         "enabled":  {
+                                                                         "destination":  true,
+                                                                         "transition":  true,
+                                                                         "duration":  true,
+                                                                         "action":  true,
+                                                                         "trigger":  true
+                                                                     }
+                                                     },
+                                     "modes":  {
+                                                   "prototype":  "On",
+                                                   "design":  "Off"
+                                               }
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  6125,
+                      "cmd":  "probe",
+                      "error":  null,
+                      "args":  {
+
+                               }
+                  },
+                  {
+                      "stage":  "focus_xd",
+                      "result":  {
+                                     "keyboardFocus":  true,
+                                     "foregroundVerified":  true,
+                                     "foregroundWindow":  394234,
+                                     "activationError":  null,
+                                     "windowHandle":  394234,
+                                     "windowName":  "Adobe XD",
+                                     "processId":  1272,
+                                     "focused":  true
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  2999,
+                      "cmd":  "focus_xd",
+                      "error":  null,
+                      "args":  {
+
+                               }
+                  },
+                  {
+                      "stage":  "ensure_mode",
+                      "result":  {
+                                     "toggleBefore":  "On",
+                                     "verified":  true,
+                                     "otherToggle":  "Off",
+                                     "toggleAfter":  "On",
+                                     "mode":  "prototype"
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  2959,
+                      "cmd":  "ensure_mode",
+                      "error":  null,
+                      "args":  {
+                                   "mode":  "prototype"
+                               }
+                  },
+                  {
+                      "stage":  "select_source",
+                      "result":  {
+                                     "uiaSelected":  true,
+                                     "requested":  "PrototypeTest/Target",
+                                     "rowText":  "PrototypeTest/Target",
+                                     "paneHeader":  "ARTBOARDS",
+                                     "scope":  "artboard",
+                                     "note":  "UIA reports the row selected; DesignBridge confirms the document selection through UXP.",
+                                     "navigation":  [
+
+                                                    ],
+                                     "wasSelected":  false
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  3374,
+                      "cmd":  "select_node",
+                      "error":  null,
+                      "args":  {
+                                   "name":  "PrototypeTest/Target",
+                                   "scope":  "artboard"
+                               }
+                  },
+                  {
+                      "stage":  "create_connector",
+                      "result":  {
+                                     "alreadyOpen":  true,
+                                     "added":  false,
+                                     "editorVisible":  true,
+                                     "state":  {
+                                                   "action":  "Transition",
+                                                   "labels":  {
+                                                                  "destination":  "interactionPopoverTargetPopup",
+                                                                  "transition":  "interactionPopoverTransitionPopup",
+                                                                  "action":  "interactionPopoverActionPopup",
+                                                                  "trigger":  "interactionPopoverTriggerEventPopup"
+                                                              },
+                                                   "transition":  "Dissolve",
+                                                   "panePresent":  true,
+                                                   "destination":  "PrototypeTest/Source",
+                                                   "easing":  "None",
+                                                   "editorOpen":  true,
+                                                   "editorVisible":  true,
+                                                   "addButton":  true,
+                                                   "trigger":  "Tap",
+                                                   "duration":  "0.3 s",
+                                                   "enabled":  {
+                                                                   "destination":  true,
+                                                                   "transition":  true,
+                                                                   "duration":  true,
+                                                                   "action":  true,
+                                                                   "trigger":  true
+                                                               }
+                                               }
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  3562,
+                      "cmd":  "add_interaction",
+                      "error":  null,
+                      "args":  {
+
+                               }
+                  },
+                  {
+                      "stage":  "connect_to_target",
+                      "result":  {
+                                     "alreadySet":  true,
+                                     "changed":  false,
+                                     "after":  "PrototypeTest/Source",
+                                     "before":  "PrototypeTest/Source",
+                                     "field":  "destination",
+                                     "control":  "interactionPopoverTargetPopup"
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  2987,
+                      "cmd":  "set_field",
+                      "error":  null,
+                      "args":  {
+                                   "value":  "PrototypeTest/Source",
+                                   "field":  "destination"
+                               }
+                  },
+                  {
+                      "stage":  "configure_trigger",
+                      "result":  {
+                                     "alreadySet":  true,
+                                     "changed":  false,
+                                     "after":  "Tap",
+                                     "before":  "Tap",
+                                     "field":  "trigger",
+                                     "control":  "interactionPopoverTriggerEventPopup"
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  2970,
+                      "cmd":  "set_field",
+                      "error":  null,
+                      "args":  {
+                                   "value":  "Tap",
+                                   "field":  "trigger"
+                               }
+                  },
+                  {
+                      "stage":  "configure_action",
+                      "result":  {
+                                     "alreadySet":  true,
+                                     "changed":  false,
+                                     "after":  "Transition",
+                                     "before":  "Transition",
+                                     "field":  "action",
+                                     "control":  "interactionPopoverActionPopup"
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  2945,
+                      "cmd":  "set_field",
+                      "error":  null,
+                      "args":  {
+                                   "value":  "Transition",
+                                   "field":  "action"
+                               }
+                  },
+                  {
+                      "stage":  "configure_transition",
+                      "result":  {
+                                     "alreadySet":  true,
+                                     "changed":  false,
+                                     "after":  "Dissolve",
+                                     "before":  "Dissolve",
+                                     "field":  "transition",
+                                     "control":  "interactionPopoverTransitionPopup"
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  3012,
+                      "cmd":  "set_field",
+                      "error":  null,
+                      "args":  {
+                                   "value":  "Dissolve",
+                                   "field":  "transition"
+                               }
+                  },
+                  {
+                      "stage":  "configure_duration",
+                      "result":  {
+                                     "changed":  false,
+                                     "before":  "0.3 s",
+                                     "alreadySet":  true,
+                                     "seconds":  0.3,
+                                     "after":  "0.3 s"
+                                 },
+                      "workerOk":  true,
+                      "ok":  true,
+                      "ms":  3080,
+                      "cmd":  "set_duration",
+                      "error":  null,
+                      "args":  {
+                                   "text":  "0.3 s",
+                                   "seconds":  0.3
+                               }
+                  },
+                  {
+                      "error":  null,
+                      "cmd":  "read_interaction",
+                      "stage":  "read_interaction",
+                      "ok":  true,
+                      "result":  {
+                                     "action":  "Transition",
+                                     "labels":  {
+                                                    "destination":  "interactionPopoverTargetPopup",
+                                                    "transition":  "interactionPopoverTransitionPopup",
+                                                    "action":  "interactionPopoverActionPopup",
+                                                    "trigger":  "interactionPopoverTriggerEventPopup"
+                                                },
+                                     "transition":  "Dissolve",
+                                     "panePresent":  true,
+                                     "destination":  "PrototypeTest/Source",
+                                     "easing":  "None",
+                                     "editorOpen":  true,
+                                     "editorVisible":  true,
+                                     "addButton":  true,
+                                     "trigger":  "Tap",
+                                     "duration":  "0.3 s",
+                                     "enabled":  {
+                                                     "destination":  true,
+                                                     "transition":  true,
+                                                     "duration":  true,
+                                                     "action":  true,
+                                                     "trigger":  true
+                                                 }
+                                 },
+                      "ms":  0
+                  }
+              ],
+    "created":  null,
+    "status":  "AUTOMATION_ONLY",
+    "nextStep":  "Run xd_validate_prototype (requiredConnections: source-\u003etarget, trigger tap, action goToArtboard) through DesignBridge for the authoritative verdict.",
+    "failure":  null
+}

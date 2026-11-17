@@ -79,6 +79,8 @@ export interface OpSpec {
   preview: (p: OpParams) => string;
 }
 
+const UPDATABLE_PROPERTIES = ["name", "style", "visible", "locked", "blendMode", "markedForExport", "fixedWhenScrolling"];
+
 // --- validation helpers -----------------------------------------------------
 
 function num(v: unknown, name: string, opts: { min?: number; max?: number; int?: boolean } = {}): string | null {
@@ -395,11 +397,20 @@ export const OPERATIONS: Record<string, OpSpec> = {
   },
   inspect_node: {
     op: "inspect_node",
-    description: "Full property dump of one node by guid.",
+    description:
+      "Full property dump of one node by guid. Child listing is paginated: childrenTotal is authoritative, childrenReturned/offset/limit describe the returned page, and hasMore/nextOffset say whether the list is complete.",
     mutating: false,
     validate: (p) => {
       const g = optGuid(p, "guid");
-      return g.error ? { ok: false, error: g.error } : { ok: true, params: { guid: g.value } };
+      if (g.error) return { ok: false, error: g.error };
+      // The plugin caps the returned child list. The bridge validates the page
+      // window so a caller can never ask for an unbounded or nonsense page and
+      // mistake a truncated list for a complete hierarchy.
+      const limit = optNum(p, "limit", { min: 1, max: 500, int: true });
+      if (limit.error) return { ok: false, error: limit.error };
+      const offset = optNum(p, "offset", { min: 0, max: 1_000_000, int: true });
+      if (offset.error) return { ok: false, error: offset.error };
+      return { ok: true, params: clean({ guid: g.value, limit: limit.value, offset: offset.value }) };
     },
     preview: (p) => `inspect_node ${String(p.guid)}`,
   },
@@ -909,7 +920,7 @@ export const OPERATIONS: Record<string, OpSpec> = {
   },
   update_node: {
     op: "update_node",
-    description: "Set writable properties (name, style, visible, locked, blendMode, markedForExport, fixedWhenScrolling) on a node by guid.",
+    description: "Set writable properties (name, style, visible, locked, blendMode, markedForExport, fixedWhenScrolling) on a node by guid. Geometry is not accepted here: use move_node/resize_node, whose coordinates are parent-relative.",
     mutating: true,
     validate: (p) => {
       const g = optGuid(p, "guid");
@@ -918,10 +929,14 @@ export const OPERATIONS: Record<string, OpSpec> = {
       if (st.error) return { ok: false, error: st.error };
       const nm = optStr(p, "name", 256);
       if (nm.error) return { ok: false, error: nm.error };
-      const vis = p.visible === undefined ? {} : { visible: typeof p.visible === "boolean" ? { value: p.visible } : { error: "visible must be boolean" } };
-      if ("error" in vis && vis.error) return { ok: false, error: vis.error };
-      const lock = p.locked === undefined ? {} : { locked: typeof p.locked === "boolean" ? { value: p.locked } : { error: "locked must be boolean" } };
-      if ("error" in lock && lock.error) return { ok: false, error: lock.error };
+      // `visible`/`locked` are optional booleans. The validated shape must be
+      // { value } directly: wrapping it one level deeper silently dropped both
+      // properties, so `update_node {visible:false}` reported ok and changed
+      // nothing (the suspected "defect E" from stage 9).
+      const vis: { value?: boolean; error?: string } = p.visible === undefined ? {} : typeof p.visible === "boolean" ? { value: p.visible } : { error: "visible must be boolean" };
+      if (vis.error) return { ok: false, error: vis.error };
+      const lock: { value?: boolean; error?: string } = p.locked === undefined ? {} : typeof p.locked === "boolean" ? { value: p.locked } : { error: "locked must be boolean" };
+      if (lock.error) return { ok: false, error: lock.error };
       let blend: string | undefined;
       if (p.blendMode !== undefined) {
         const allowed = BLEND_MODES;
@@ -932,6 +947,24 @@ export const OPERATIONS: Record<string, OpSpec> = {
       }
       for (const key of ["markedForExport", "fixedWhenScrolling"] as const) {
         if (p[key] !== undefined && typeof p[key] !== "boolean") return { ok: false, error: `${key} must be boolean` };
+      }
+      // Geometry is NOT part of this operation. Rejecting it explicitly prevents
+      // the silent no-op found in stage 9, where `frame` was accepted, reported
+      // ok, and changed nothing.
+      const GEOMETRY_KEYS = ["frame", "x", "y", "width", "height"] as const;
+      for (const key of GEOMETRY_KEYS) {
+        if (p[key] !== undefined) {
+          return {
+            ok: false,
+            error: `UNSUPPORTED_PROPERTY: ${key}. update_node accepts ${UPDATABLE_PROPERTIES.join(", ")} only; use move_node (x,y) or resize_node (width,height) for geometry - both are parent-relative.`,
+          };
+        }
+      }
+      const KNOWN = new Set<string>([...UPDATABLE_PROPERTIES, ...GEOMETRY_KEYS, "op", "guid"]);
+      for (const key of Object.keys(p)) {
+        if (!KNOWN.has(key)) {
+          return { ok: false, error: `UNKNOWN_PROPERTY: ${key}. update_node accepts ${UPDATABLE_PROPERTIES.join(", ")}.` };
+        }
       }
       return {
         ok: true,
@@ -947,7 +980,8 @@ export const OPERATIONS: Record<string, OpSpec> = {
   },
   move_node: {
     op: "move_node",
-    description: "Reposition a node by guid (absolute or relative).",
+    description:
+      "Reposition a node by guid. Coordinates are PARENT-RELATIVE: the default is an absolute position inside the node's current parent, `relative:true` is an additive offset. The result reports before/after bounds, the delta and whether the node is still inside its artboard.",
     mutating: true,
     validate: (p) => {
       const g = optGuid(p, "guid");
@@ -964,19 +998,24 @@ export const OPERATIONS: Record<string, OpSpec> = {
   },
   resize_node: {
     op: "resize_node",
-    description: "Resize a node by guid (absolute or relative width/height).",
+    description:
+      "Resize a node by guid. Width/height are parent-relative dimensions; `relative:true` treats them as scale factors. The result reads the resulting size back and fails with MUTATION_VERIFICATION_FAILED when the host did not apply it.",
     mutating: true,
     validate: (p) => {
       const g = optGuid(p, "guid");
       if (g.error) return { ok: false, error: g.error };
-      const w = optNum(p, "width", { min: 0.1, max: 20000 });
-      if (w.error) return { ok: false, error: w.error };
-      const h = optNum(p, "height", { min: 0.1, max: 20000 });
-      if (h.error) return { ok: false, error: h.error };
-      if (w.value === undefined && h.value === undefined) return { ok: false, error: "provide width and/or height" };
       const rel = p.relative === undefined ? { value: false } : typeof p.relative === "boolean" ? { value: p.relative } : { error: "relative must be boolean" };
       if ((rel as { error?: string }).error) return { ok: false, error: (rel as { error: string }).error };
-      return { ok: true, params: clean({ guid: g.value, width: w.value, height: h.value, relative: (rel as { value: boolean }).value }) };
+      const relative = (rel as { value: boolean }).value;
+      // A relative scale factor of 0 would collapse the node, so the floor is
+      // 0.01; absolute dimensions must stay positive for the same reason.
+      const min = relative ? 0.01 : 0.1;
+      const w = optNum(p, "width", { min, max: 20000 });
+      if (w.error) return { ok: false, error: w.error };
+      const h = optNum(p, "height", { min, max: 20000 });
+      if (h.error) return { ok: false, error: h.error };
+      if (w.value === undefined && h.value === undefined) return { ok: false, error: "provide width and/or height" };
+      return { ok: true, params: clean({ guid: g.value, width: w.value, height: h.value, relative }) };
     },
     preview: (p) => `resize_node ${String(p.guid)}`,
   },
@@ -1321,3 +1360,4 @@ export function validateOperation(raw: unknown): { ok: true; op: string; params:
   if (!v.ok) return { ok: false, error: `[${o.op}] ${v.error}` };
   return { ok: true, op: o.op, params: v.params };
 }
+
