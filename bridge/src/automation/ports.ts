@@ -54,7 +54,15 @@ export function createXdPorts(link: XdLink, runner: AutomationRunner): Authoring
 
       if (GUID_RE.test(input)) {
         const r = await link.execute("inspect_node", { guid: input });
-        return r.ok ? ok(nodeOf(r.result as Row)) : ok(null);
+        if (!r.ok) return ok(null);
+        // inspect_node replies with { ok, node }; older fakes reply with the node
+        // itself. Passing the { ok, node } wrapper straight to nodeOf() produced a
+        // source with an empty guid, which collapsed the per-source trigger-slot
+        // key (false duplicate_trigger_slot) and made authoring fail with
+        // SOURCE_NOT_FOUND.
+        const payload = (r.result ?? null) as Row | null;
+        const row = payload && typeof payload.node === "object" && payload.node !== null ? (payload.node as Row) : payload;
+        return ok(row ? nodeOf(row) : null);
       }
 
       const r = await link.execute("search_nodes", { query: input, limit: 50 });

@@ -784,3 +784,23 @@ test("replay: a same-slot wire that is not an exact match blocks before the UI",
   assert.equal(result.failure?.stage, "precheck");
   assert.equal(runner.calls.length, 0, "no partial interaction can be created");
 });
+
+test("ports keep the source GUID from the real { ok, node } inspect payload", async () => {
+  const { createXdPorts } = await import("../bridge/src/automation/ports.ts");
+  const link = {
+    execute: async (op: string) => {
+      if (op === "get_artboards") return { ok: true, result: { artboards: [] } };
+      if (op === "inspect_node") {
+        // exact shape the plugin returns: { ok: true, node: {...} }
+        return { ok: true, result: { ok: true, node: { guid: "22222222-2222-2222-2222-222222222222", name: "CTA/Link", type: "Text" } } };
+      }
+      return { ok: false, error: `unexpected op ${op}` };
+    },
+  } as unknown as Parameters<typeof createXdPorts>[0];
+  const ports = createXdPorts(link, { run: async () => ({ ok: true, cmd: "noop", result: {} }) });
+
+  const byGuid = await ports.resolveSource("22222222-2222-2222-2222-222222222222");
+  assert.equal(byGuid.reason, "ok");
+  assert.equal(byGuid.node?.guid, "22222222-2222-2222-2222-222222222222", "the wrapper must be unwrapped");
+  assert.equal(byGuid.node?.type, "Text");
+});
