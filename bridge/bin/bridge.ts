@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     }
   }
 
-  startMcp(link, { serverInfo: { name: "adobexd-design-bridge", version: "1.0.0" } });
+  startMcp(link, { serverInfo: { name: "adobexd-design-bridge", version: "2.0.0" } });
 
   process.on("SIGINT", () => {
     link.stop();

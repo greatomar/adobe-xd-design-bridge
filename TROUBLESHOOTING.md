@@ -4,7 +4,7 @@
 
 **`opencode mcp list` shows the server but not connected**
 - Run the entry directly to see the error:
-  `C:\Users\Omar\AppData\Local\mise\installs\node\26.13.0\node.exe C:\Users\Omar\AppData\Local\OpenCode\AdobeXD-DesignBridge\bridge\bin\bridge.ts`
+  `node bridge\bin\bridge.ts`
 - Common causes: port 27183 already bound by another bridge instance (stop it or set
   `XD_BRIDGE_PORT` in the MCP config `environment`), or Node path moved (update the absolute
   path in `~\.config\opencode\opencode.json`).

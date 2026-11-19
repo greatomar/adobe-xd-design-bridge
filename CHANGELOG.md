@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.0.0 - 2026-11-19 (Prototype authoring, installable in five minutes)
+
+The first release that can **create** prototype interactions, not only verify them,
+and the first that a new OpenCode user can install with one command.
+
+### Added
+- **Prototype authoring through Windows UI Automation.** `xd_create_prototype_interaction`
+  drives XD's Layers list and Interaction pane, then proves the wire through the UXP
+  read-back (`created:true` + `verified:true` only when the document contains it).
+  `xd_create_prototype_graph` serialises many edges, is idempotent (`already_exists`)
+  and non-destructive (`conflict`), with `fail_fast` / `continue_on_error`.
+- **Preflight and grammar.** `xd_validate_prototype_plan` classifies every planned edge
+  against the measured XD grammar before authoring; `xd_get_prototype_grammar` exposes
+  that grammar (trigger/action/transition combinations that are actually authorable).
+- **Panel execution automation.** `xd_pending_status`, `xd_apply_pending` and
+  `xd_verify_pending` read the real queue, activate the panel's Apply control and wait
+  for `batchExecuted` instead of assuming the click worked.
+- **Diagnostics.** `xd_probe_xd_automation` reports what XD exposes to accessibility and
+  what it does not (the canvas); `xd_get_capabilities` reports the bridge operation
+  catalog plus plugin capability flags.
+- **`xd_create_screen`** - a whole screen in one queued transaction.
+- **`install.ps1`** plus `scripts/merge-mcp.mjs`: prerequisite checks, dependency
+  install, token creation, comment-safe merge into `opencode.json` with a timestamped
+  backup, and installation of the design agent and skills.
+- **Bundled OpenCode assets**: `agents/design.md` and seven original skills
+  (`adobe-xd-specialist`, `ux-architecture`, `design-system-engineering`,
+  `visual-design-direction`, `visual-qa-and-critique`, `prototyping-and-interaction`,
+  `accessibility-design`).
+- **`README.ar.md`** - complete Arabic setup and usage guide.
+
+### Fixed
+- **Prototype source resolution** keeps the GUID returned by the `inspect_node` payload
+  instead of re-deriving it from the name (ambiguous names produced the wrong source).
+- **Artboard-relative placement** for child nodes created through automation, and
+  `reparent_node` now verifies the resulting relationship instead of trusting
+  `addChild`'s return value.
+
+### Changed
+- Tool surface 72 -> **78**; test suite 196 -> **320** (all passing, offline).
+- Version numbers aligned across bridge (`2.0.0`), plugin (`2.0.0`), MCP server info
+  and `xd_health`.
+- `bridge/package.json` `bin`/`start` now point at `bin/bridge.ts` (the previous entries
+  referenced a `bridge.js` that never existed).
+
 ## 1.1.6 - 2026-11-18 (Mutation contracts: no more silent no-ops)
 
 Stage 9 visual work exposed operations that returned `ok:true` without performing the mutation.

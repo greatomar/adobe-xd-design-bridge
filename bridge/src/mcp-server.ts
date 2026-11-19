@@ -67,7 +67,7 @@ export function startMcp(link: XdLink, opts: { serverInfo?: Record<string, unkno
         return {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: opts.serverInfo ?? { name: "adobexd-design-bridge", version: "1.0.0" },
+          serverInfo: opts.serverInfo ?? { name: "adobexd-design-bridge", version: "2.0.0" },
           instructions:
             "Adobe XD design bridge. Call xd_health first to check the XD plugin connection. All xd_* tools are validated operations on the active XD document; unsupported XD capabilities are reported honestly, never simulated.",
         };

@@ -294,7 +294,7 @@ export function buildTools(link: XdLink): Record<string, ToolDef> {
       description:
         "Bridge and Adobe XD connection health check. Always call this first. Returns bridge status, XD connection state, bridge request depth, and last plugin event. It does not expose the panel's in-memory write queue.",
       inputSchema: { type: "object", properties: {} },
-      handler: async () => json({ ok: true, bridge: { version: "1.0.0" }, link: link.status }),
+      handler: async () => json({ ok: true, bridge: { version: "2.0.0" }, link: link.status }),
     },
 
     xd_get_capabilities: {

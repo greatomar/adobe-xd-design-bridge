@@ -1,12 +1,11 @@
 # Testing
 
-## Automated test suite (passing: 319/319, 2026-11-18)
+## Automated test suite (passing: 320/320, 2026-11-19)
 
 Run from `bridge/`:
 
 ```powershell
-& C:\Users\Omar\AppData\Local\mise\installs\node\26.13.0\node.exe --test --test-timeout=30000 `
-  ..\tests\*.test.ts
+node --test --test-timeout=60000 ..\tests\*.test.ts
 ```
 
 ### tests/agent-contract.test.ts (12 tests) — agent/skill policy lint

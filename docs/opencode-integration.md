@@ -1,29 +1,23 @@
 # OpenCode Integration
 
-## Design Agent
+Everything OpenCode needs to make the bridge useful, and nothing it does not.
 
-`~\.config\opencode\agents\design.md`
+## 1. What OpenCode must provide
 
-- ID: `design` — mode `all` (selectable as a primary agent AND invocable as a subagent).
-- Color `#7C6BFF`; description visible to parent agents choosing subagents.
-- Permissions: full read/skill/web access; `edit` and `shell` are **ask-gated**; subagent use
-  restricted to `design` (review delegation). No backend/database/deployment permissions.
-- Body: identity, phase-by-phase skill loading map, 15-step workflow, XD execution rules,
-  delivery-report contract (10 sections).
+| Capability | Detail |
+|---|---|
+| **Local MCP servers** | The bridge is a stdio MCP server (`bridge/bin/bridge.ts`), spawned by OpenCode at session start |
+| **Code Mode** | Tools are exposed as `tools["adobe-xd"].xd_*`; the agent calls them through its code runtime |
+| **Agents** | `agents/design.md`, mode `all` — selectable as primary and invocable as a subagent |
+| **Skills** | `skills/<id>/SKILL.md`; loaded by the agent when a task matches |
+| **Long tool timeouts** | `execution: 600000` ms, because prototype authoring drives a UI one wire at a time |
 
-**Select as primary:** In OpenCode press Tab (or use the agent selector) and choose `design`.
-**Invoke as subagent:** "Use the design agent to …" from Build/Plan, or via the `subagent` tool
-with agent `design`. Other agents can launch it because `subagent` permission rules on *their*
-side control spawning (the built-in agents allow it by default).
+No API keys, no cloud account and no network access are required for the design
+path. Asset search uses the network when available.
 
-**Handoff workflow (Design → Build):** the design agent's delivery report is the contract; Build
-implements from it and must not silently replace the approved XD design. When the design agent
-is asked, it also writes a machine-readable token JSON into the project for Build.
+## 2. MCP registration
 
-## MCP server
-
-`~\.config\opencode\opencode.json` (global, merged — this file did not exist before; the only
-pre-existing file, `service.json`, was preserved and backed up to `backup-2026-11-10\`):
+`%USERPROFILE%\.config\opencode\opencode.json`:
 
 ```jsonc
 {
@@ -32,9 +26,9 @@ pre-existing file, `service.json`, was preserved and backed up to `backup-2026-1
     "servers": {
       "adobe-xd": {
         "type": "local",
-        "command": ["C:\\Users\\Omar\\AppData\\Local\\mise\\installs\\node\\26.13.0\\node.exe",
-                    "C:\\Users\\Omar\\AppData\\Local\\OpenCode\\AdobeXD-DesignBridge\\bridge\\bin\\bridge.ts"],
-        "cwd": "C:\\Users\\Omar\\AppData\\Local\\OpenCode\\AdobeXD-DesignBridge\\bridge",
+        "command": ["C:\\Program Files\\nodejs\\node.exe",
+                    "C:\\path\\to\\adobe-xd-design-bridge\\bridge\\bin\\bridge.ts"],
+        "cwd": "C:\\path\\to\\adobe-xd-design-bridge\\bridge",
         "environment": { "XD_BRIDGE_VERBOSE": "0" },
         "timeout": { "startup": 30000, "catalog": 30000, "execution": 600000 }
       }
@@ -44,25 +38,78 @@ pre-existing file, `service.json`, was preserved and backed up to `backup-2026-1
 ```
 
 Notes:
-- Absolute Node path → starts reliably regardless of shell/mise initialization.
-- The bridge process hosts the WebSocket server; it runs for the lifetime of the MCP connection.
-- Tools appear in Code Mode as `tools["adobe-xd"].xd_*`. Source v1.0.3 defines 47 MCP tools;
-  the currently connected MCP process may still expose the previous 29-tool catalog until it is
-  reloaded.
 
-## Skill discovery verification (2026-11-10)
+- Use an **absolute Node path** — OpenCode starts the server from its own
+  environment, where a bare `node` may not resolve.
+- `cwd` must be `bridge/`: relative imports, `.bridge-token`, `bridge.log` and
+  `exports/` are resolved from there.
+- The bridge process hosts the WebSocket server for the XD plugin, so it lives as
+  long as the MCP connection.
+- The current source defines **78 MCP tools** (`tools.ts`). A session started
+  before a config change keeps the old catalog — restart OpenCode.
 
-`GET /api/skill` returned, without duplicates:
-`accessibility-design, adobe-xd-specialist, design-system-engineering, frontend-design,
-impeccable, prototyping-and-interaction, ui-ux-pro-max, ux-architecture,
-visual-design-direction, visual-qa-and-critique` + built-ins (`browser`, `opencode`, `report`).
+`scripts/merge-mcp.mjs` performs this merge safely (JSONC-aware, preserves other
+servers and plugins).
 
-`GET /api/agent` returned all built-ins unchanged (`build`, `plan`, `general`, `explore`, hidden
-maintenance agents) plus `design` — nothing removed or overridden.
+## 3. Design agent
 
-## Vision model guidance (hybrid critic)
+`agents/design.md` → installed to `%USERPROFILE%\.config\opencode\agents\`.
 
-Keep operation planning on the session's working model; route screenshot critique through the
-strongest available vision-capable model configured in OpenCode (e.g. a frontier multimodal
-model among the configured `opencode`/`opencode-go` providers). Check `opencode models` for what
-is currently configured; no new providers or API keys were created for this project.
+- ID `design`, mode `all`, color `#7C6BFF`.
+- Permissions: read/skill/web allowed; `edit` and `shell` are **ask-gated**; no
+  backend/deployment permissions; no self-recursion.
+- Body: identity, phase-by-phase skill loading map, execution state machine,
+  XD write protocol, verification levels (1-7), stop conditions, delivery report.
+
+**Select as primary:** press Tab / use the agent selector and choose `design`.
+**Invoke as subagent:** "Use the design agent to …", or via the `subagent` tool.
+
+**Design → Build handoff:** the delivery report is the contract; Build implements
+from it and must not silently replace the approved XD design. When asked, the
+design agent also writes machine-readable token JSON into the project.
+
+## 4. Skills
+
+Bundled (original content, MIT with the repository):
+
+| Skill | Purpose |
+|---|---|
+| `adobe-xd-specialist` | XD document model, tool workflow, queue mechanics, failure codes — load before the first XD call |
+| `ux-architecture` | Personas, task inventory, flows, IA, state matrix |
+| `design-system-engineering` | Token JSON, component spec cards, scales, cross-artboard consistency |
+| `visual-design-direction` | Art direction, anti-generic discipline, composition |
+| `visual-qa-and-critique` | Screenshot critique dimensions, findings format, iteration cap |
+| `prototyping-and-interaction` | Flow specs, transition vocabulary, XD prototype limits |
+| `accessibility-design` | WCAG 2.2 contrast, targets, states, XD representability |
+
+Optional, **not** bundled (upstream licenses): `frontend-design` (Anthropic,
+locally adapted), `ui-ux-pro-max` (NextLevelBuilder), `impeccable` (pbakaus).
+Install them from their own repositories; see `docs/skills-and-updates.md`.
+
+## 5. Permissions and execution model
+
+The agent never talks to XD directly. Its constraints:
+
+1. **Queued ≠ applied.** `xd_execute_*` returns `{queued:true}`; the panel applies
+   the queue inside one `editDocument` transaction.
+2. **Ask for panel execution, not design approval.** Panel clicks, ambiguity and
+   destructive actions belong to the user.
+3. **Read-back before claiming success.** `xd_get_operation_status`,
+   `xd_verify_pending`, `xd_validate_document` and exports are the evidence.
+
+`allow` the `adobe-xd` tools in your OpenCode permission config if you use
+per-tool rules; otherwise the default (MCP tools allowed) is fine.
+
+## 6. Vision guidance
+
+Keep operation planning on the session's working model; route screenshot critique
+through the strongest vision-capable model available in `opencode models`. No new
+provider or key is required by this project.
+
+## 7. Reload checklist
+
+After changing `opencode.json`, the agent, a skill, or the plugin:
+
+1. Reload the plugin in UXP Developer Tool (plugin code changes only).
+2. Restart the OpenCode session (MCP catalog, agent and skills are read at start).
+3. Run `xd_health` and confirm `xdConnected: true` before doing design work.

@@ -123,7 +123,7 @@ export class XdLink {
           capabilities: Array.isArray(msg.capabilities) ? (msg.capabilities as string[]) : [],
           connectedAt: Date.now(),
         };
-        ws.send(JSON.stringify({ type: "ready", serverVersion: "1.0.0" }));
+        ws.send(JSON.stringify({ type: "ready", serverVersion: "2.0.0" }));
         log("info", "plugin connected", this.pluginInfo);
         this.pump();
         return;
